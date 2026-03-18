@@ -46,6 +46,7 @@ dependencies:
   url_launcher: ^6.2.4
   # UUID generation
   uuid: ^4.3.3
+  dio: ^5.9.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
