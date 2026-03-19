@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:web_stack/screens/port_screen.dart';
 import '../models/website.dart';
 import '../services/website_service.dart';
+import '../widgets/rocket_loading_screen.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/website_card.dart';
 
@@ -18,6 +19,7 @@ class _DashboardState extends State<Dashboard> {
   List<Website> all = [];
   String selectedDepartment = "ALL";
   bool loading = true;
+  bool showContent = false;
 
   /// 🔥 UI state
   String sortType = "type"; // none | type
@@ -67,15 +69,29 @@ class _DashboardState extends State<Dashboard> {
   }
 
   void load() async {
+    setState(() {
+      loading = true;
+      showContent = false;
+    });
+
     final data = await WebsiteService.fetchWebsites();
-
     final urls = data.map((e) => e.url).toList();
-
     final result = await WebsiteService.checkBatch(urls);
+
+    // Đợi rocket bay đi (ít nhất 1 giây để animation đẹp)
+    await Future.delayed(const Duration(milliseconds: 1000));
+
     setState(() {
       all = data;
       loading = false;
       statusMap = result;
+    });
+
+    // Delay nhỏ trước khi trigger explosion animation
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    setState(() {
+      showContent = true;
     });
   }
 
@@ -366,33 +382,36 @@ class _DashboardState extends State<Dashboard> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
-      body: Row(
+      body: Stack(
         children: [
-          /// 🔥 SIDEBAR
-          Sidebar(
-            departments: departments,
-            selected: selectedDepartment,
-            onSelect: (v) => setState(() => selectedDepartment = v),
-          ),
-
-          /// 🔥 MAIN CONTENT
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xFF0B132B),
-                    Color(0xFF1C2541),
-                    Color(0xFF0F172A),
-                  ],
+          // 🔥 MAIN CONTENT với Explosion Animation
+          ExplodeTransition(
+            show: showContent,
+            child: Row(
+              children: [
+                /// 🔥 SIDEBAR
+                Sidebar(
+                  departments: departments,
+                  selected: selectedDepartment,
+                  onSelect: (v) => setState(() => selectedDepartment = v),
                 ),
-              ),
-              child: loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : Column(
+
+                /// 🔥 MAIN CONTENT
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Color(0xFF0B132B),
+                          Color(0xFF1C2541),
+                          Color(0xFF0F172A),
+                        ],
+                      ),
+                    ),
+                    child: Column(
                       children: [
                         buildToolbar(),
                         const SizedBox(height: 16),
@@ -447,8 +466,14 @@ class _DashboardState extends State<Dashboard> {
                         ),
                       ],
                     ),
+                  ),
+                ),
+              ],
             ),
           ),
+
+          // 🚀 ROCKET LOADING OVERLAY (hiện khi đang load)
+          if (loading) const RocketLoadingScreen(),
         ],
       ),
     );
