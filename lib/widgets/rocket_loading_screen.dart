@@ -134,11 +134,11 @@ class _RocketLoadingScreenState extends State<RocketLoadingScreen>
                         angle: _rotationAnimation.value,
                         child: ShaderMask(
                           shaderCallback: (bounds) => const LinearGradient(
-                            colors: const [
+                            colors: [
                               Color(0xFF22C55E),
                               Color(0xFF3B82F6),
                               Color(0xFF8B5CF6),
-                              Color(0xFFF59E0B),
+                              Color(0xFF67460A),
                               Color(0xFF22C55E),
                             ],
                             begin: Alignment.topLeft,
