@@ -182,21 +182,37 @@ class _DashboardState extends State<Dashboard> {
             children: [
               Padding(
                 padding: const EdgeInsets.all(12),
-                child: Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: list
-                      .map(
-                        (w) => SizedBox(
-                          width: 260,
-                          height: 170,
-                          child: WebsiteCard(
-                            website: w,
-                            isAlive: statusMap[w.url],
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+
+                    double itemWidth;
+
+                    if (width < 600) {
+                      itemWidth = width; // full mobile
+                    } else if (width < 1000) {
+                      itemWidth = width / 2 - 16;
+                    } else {
+                      itemWidth = 260;
+                    }
+
+                    return Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: list.map((w) {
+                        return SizedBox(
+                          width: itemWidth,
+                          child: AspectRatio(
+                            aspectRatio: 1.4,
+                            child: WebsiteCard(
+                              website: w,
+                              isAlive: statusMap[w.url],
+                            ),
                           ),
-                        ),
-                      )
-                      .toList(),
+                        );
+                      }).toList(),
+                    );
+                  },
                 ),
               ),
             ],
@@ -208,118 +224,91 @@ class _DashboardState extends State<Dashboard> {
 
   /// 🔥 TOOLBAR
   Widget buildToolbar() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    final width = MediaQuery.of(context).size.width;
+    final isMobile = width < 600;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          "🌐 WEBSITE DASHBOARD",
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-
+        /// 🔥 MAIN ROW
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            /// 🔥 SORT BUTTON
-            GestureDetector(
-              onTap: () {
-                setState(() {
-                  sortType = sortType == "type" ? "none" : "type";
-                });
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                margin: const EdgeInsets.only(right: 10),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: sortType == "type"
-                      ? Colors.blue.withOpacity(0.2)
-                      : Colors.white10,
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.sort,
-                      size: 16,
-                      color: sortType == "type" ? Colors.blue : Colors.white70,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      "Sort Type",
+            /// LEFT: ICON + TITLE
+            Expanded(
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.travel_explore,
+                    size: isMobile ? 16 : 28,
+                    color: Color(0xFF3B82F6),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "WEBSITE DASHBOARD",
                       style: TextStyle(
-                        color: sortType == "type"
-                            ? Colors.blue
-                            : Colors.white70,
+                        color: Colors.white,
+                        fontSize: isMobile ? 16 : 24,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
 
-            /// 🔥 TOGGLE TREE MODE
-            GestureDetector(
-              onTap: () {
-                setState(() {
-                  isTreeMode = !isTreeMode;
-                });
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: isTreeMode
-                      ? Colors.green.withOpacity(0.2)
-                      : Colors.white10,
-                ),
-                child: Row(
+            /// RIGHT: ACTIONS
+            Flexible(
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 10,
+                  runSpacing: 10,
                   children: [
-                    Icon(
-                      isTreeMode ? Icons.grid_view : Icons.account_tree,
-                      size: 16,
-                      color: isTreeMode ? Colors.green : Colors.white70,
+                    _buildBtn(
+                      icon: Icons.sort,
+                      label: "Sort",
+                      active: sortType == "type",
+                      activeColor: Colors.blue,
+                      isMobile: isMobile,
+                      onTap: () {
+                        setState(() {
+                          sortType = sortType == "type" ? "none" : "type";
+                        });
+                      },
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      isTreeMode ? "Grid View" : "Tree View",
-                      style: TextStyle(
-                        color: isTreeMode ? Colors.green : Colors.white70,
-                      ),
+
+                    _buildBtn(
+                      icon: isTreeMode ? Icons.grid_view : Icons.account_tree,
+                      label: isTreeMode ? "Grid" : "Tree",
+                      active: isTreeMode,
+                      activeColor: Colors.green,
+                      isMobile: isMobile,
+                      onTap: () {
+                        setState(() {
+                          isTreeMode = !isTreeMode;
+                        });
+                      },
                     ),
-                  ],
-                ),
-              ),
-            ),
-            GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => PortScreen(websites: all)),
-                );
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                margin: const EdgeInsets.only(left: 10),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: Colors.purple.withOpacity(0.2),
-                ),
-                child: Row(
-                  children: const [
-                    Icon(Icons.hub, size: 16, color: Colors.purple),
-                    SizedBox(width: 6),
-                    Text("Ports", style: TextStyle(color: Colors.purple)),
+
+                    _buildBtn(
+                      icon: Icons.hub,
+                      label: "Ports",
+                      active: true,
+                      activeColor: Colors.purple,
+                      isMobile: isMobile,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PortScreen(websites: all),
+                          ),
+                        );
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -327,6 +316,47 @@ class _DashboardState extends State<Dashboard> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildBtn({
+    required IconData icon,
+    required String label,
+    required bool active,
+    required Color activeColor,
+    required bool isMobile,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 10 : 12,
+          vertical: isMobile ? 5 : 6,
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: active ? activeColor.withOpacity(0.2) : Colors.white10,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: isMobile ? 14 : 16,
+              color: active ? activeColor : Colors.white70,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: isMobile ? 12 : 14,
+                color: active ? activeColor : Colors.white70,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -371,20 +401,46 @@ class _DashboardState extends State<Dashboard> {
                         Expanded(
                           child: isTreeMode
                               ? buildTree(data)
-                              : GridView.builder(
-                                  itemCount: data.length,
-                                  gridDelegate:
-                                      const SliverGridDelegateWithFixedCrossAxisCount(
-                                        crossAxisCount: 4,
-                                        crossAxisSpacing: 16,
-                                        mainAxisSpacing: 16,
-                                        childAspectRatio: 1.4,
-                                      ),
-                                  itemBuilder: (_, i) {
-                                    final w = data[i];
-                                    return WebsiteCard(
-                                      website: data[i],
-                                      isAlive: statusMap[w.url],
+                              : LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final width = constraints.maxWidth;
+
+                                    int crossAxisCount;
+                                    double childAspectRatio;
+
+                                    if (width < 600) {
+                                      crossAxisCount = 1; // mobile
+                                      childAspectRatio = 1.3;
+                                    } else if (width < 900) {
+                                      crossAxisCount = 2; // tablet nhỏ
+                                      childAspectRatio = 1.35;
+                                    } else if (width < 1200) {
+                                      crossAxisCount = 3; // tablet lớn
+                                      childAspectRatio = 1.4;
+                                    } else if (width < 1600) {
+                                      crossAxisCount = 4; // desktop
+                                      childAspectRatio = 1.45;
+                                    } else {
+                                      crossAxisCount = 5; // màn to
+                                      childAspectRatio = 1.5;
+                                    }
+
+                                    return GridView.builder(
+                                      itemCount: data.length,
+                                      gridDelegate:
+                                          SliverGridDelegateWithFixedCrossAxisCount(
+                                            crossAxisCount: crossAxisCount,
+                                            crossAxisSpacing: 16,
+                                            mainAxisSpacing: 16,
+                                            childAspectRatio: childAspectRatio,
+                                          ),
+                                      itemBuilder: (_, i) {
+                                        final w = data[i];
+                                        return WebsiteCard(
+                                          website: w,
+                                          isAlive: statusMap[w.url],
+                                        );
+                                      },
                                     );
                                   },
                                 ),

@@ -4,7 +4,9 @@ import 'package:dio/dio.dart';
 class WebsiteService {
   static final Dio dio = Dio(
     BaseOptions(
-      baseUrl: 'http://localhost:9999',
+      // baseUrl: 'http://localhost:9999',
+      baseUrl: 'http://192.168.122.16:9095',
+
       connectTimeout: const Duration(seconds: 5),
       receiveTimeout: const Duration(seconds: 5),
       headers: {'Content-Type': 'application/json'},
