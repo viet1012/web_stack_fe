@@ -1,28 +1,34 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/website.dart';
 import 'package:dio/dio.dart';
 
 class WebsiteService {
   static final Dio dio = Dio(
     BaseOptions(
-      // baseUrl: 'http://localhost:9999',
-      baseUrl: 'http://192.168.122.16:9095',
+      baseUrl: 'http://localhost:9999',
 
-      connectTimeout: const Duration(seconds: 5),
-      receiveTimeout: const Duration(seconds: 5),
+      // baseUrl: 'http://192.168.122.16:9095',
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
       headers: {'Content-Type': 'application/json'},
     ),
   );
 
   // init interceptor (log request/response)
   static void init() {
-    dio.interceptors.add(LogInterceptor(requestBody: true, responseBody: true));
+    if (kDebugMode) {
+      dio.interceptors.add(
+        LogInterceptor(requestBody: true, responseBody: true),
+      );
+    }
   }
 
   // GET ALL
   static Future<List<Website>> fetchWebsites() async {
     try {
       final response = await dio.get('/api/websites');
-      print(response.data);
+
       final List data = response.data;
 
       return data.map((e) => Website.fromJson(e)).toList();
@@ -32,37 +38,27 @@ class WebsiteService {
   }
 
   // CHECK WEB ACTIVE
+  static Map<String, bool> _cache = {};
+  static DateTime? _lastFetch;
+
   static Future<Map<String, bool>> checkBatch(List<String> urls) async {
     try {
+      // 🔥 cache 30s
+      if (_lastFetch != null &&
+          DateTime.now().difference(_lastFetch!).inSeconds < 30) {
+        return _cache;
+      }
+
       final res = await dio.post('/api/websites/check-batch', data: urls);
 
-      return Map<String, bool>.from(res.data);
-    } catch (_) {
-      return {};
-    }
-  }
+      final result = Map<String, bool>.from(res.data);
 
-  static final Map<String, bool> _cache = {};
-
-  static Future<bool> checkWebsite(String url) async {
-    if (_cache.containsKey(url)) {
-      return _cache[url]!;
-    }
-
-    try {
-      final response = await dio.get(
-        '/api/websites/check',
-        queryParameters: {'url': url},
-      );
-
-      final result =
-          response.data == true || response.data.toString() == "true";
-
-      _cache[url] = result;
+      _cache = result;
+      _lastFetch = DateTime.now();
 
       return result;
-    } catch (_) {
-      return false;
+    } catch (e) {
+      return {};
     }
   }
 

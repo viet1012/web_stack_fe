@@ -20,55 +20,79 @@ class _DashboardState extends State<Dashboard> {
   String selectedDepartment = "ALL";
   bool loading = true;
   bool showContent = false;
-
-  /// 🔥 UI state
-  String sortType = "type"; // none | type
+  String sortType = "type";
   bool isTreeMode = false;
-  List<Website> websites = [];
   Map<String, bool> statusMap = {};
 
-  Timer? timer;
+  Timer? _refreshTimer;
+
+  // 🔥 Chỉ check lại URLs đang bị lỗi + URLs mới
+  Set<String> _failedUrls = {};
 
   @override
   void initState() {
     super.initState();
-
     load();
-
-    /// 🔥 AUTO REFRESH TOÀN LIST
-    timer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      final data = await WebsiteService.fetchWebsites();
-
-      final urls = data.map((e) => e.url).toList();
-      final result = await WebsiteService.checkBatch(urls);
-
-      if (!mounted) return;
-
-      final isSameList = isSameWebsiteList(all, data);
-      final isSameMap = isSameStatus(statusMap, result);
-
-      /// 🔥 chỉ update khi có thay đổi
-      if (!isSameList || !isSameMap) {
-        setState(() {
-          if (!isSameList) {
-            all = data;
-          }
-
-          if (!isSameMap) {
-            statusMap = result;
-          }
-        });
-      }
-    });
+    _startSmartRefresh();
   }
 
   @override
   void dispose() {
-    timer?.cancel();
+    _refreshTimer?.cancel();
     super.dispose();
   }
 
-  void load() async {
+  void _startSmartRefresh() {
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => _refresh(),
+    );
+  }
+
+  Future<void> _refresh() async {
+    try {
+      final data = await WebsiteService.fetchWebsites();
+
+      // 🔥 Tìm URLs mới (chưa có trong statusMap)
+      final newUrls = data
+          .map((e) => e.url)
+          .where((url) => !statusMap.containsKey(url))
+          .toSet();
+
+      // 🔥 Chỉ check: URLs lỗi + URLs mới (không check lại toàn bộ)
+      final urlsToCheck = {..._failedUrls, ...newUrls}.toList();
+
+      final partialResult = urlsToCheck.isNotEmpty
+          ? await WebsiteService.checkBatch(urlsToCheck)
+          : <String, bool>{};
+
+      if (!mounted) return;
+
+      // 🔥 Merge vào map hiện tại
+      final updatedMap = Map<String, bool>.from(statusMap)
+        ..addAll(partialResult);
+
+      // 🔥 Cập nhật danh sách URL đang fail để check lại lần sau
+      _failedUrls = updatedMap.entries
+          .where((e) => e.value == false)
+          .map((e) => e.key)
+          .toSet();
+
+      final isSameList = isSameWebsiteList(all, data);
+      final isSameMap = isSameStatus(statusMap, updatedMap);
+
+      if (!isSameList || !isSameMap) {
+        setState(() {
+          if (!isSameList) all = data;
+          if (!isSameMap) statusMap = updatedMap;
+        });
+      }
+    } catch (e) {
+      debugPrint('Refresh error: $e');
+    }
+  }
+
+  Future<void> load() async {
     setState(() {
       loading = true;
       showContent = false;
@@ -78,8 +102,14 @@ class _DashboardState extends State<Dashboard> {
     final urls = data.map((e) => e.url).toList();
     final result = await WebsiteService.checkBatch(urls);
 
-    // Đợi rocket bay đi (ít nhất 1 giây để animation đẹp)
+    _failedUrls = result.entries
+        .where((e) => e.value == false)
+        .map((e) => e.key)
+        .toSet();
+
     await Future.delayed(const Duration(milliseconds: 1000));
+
+    if (!mounted) return;
 
     setState(() {
       all = data;
@@ -87,12 +117,10 @@ class _DashboardState extends State<Dashboard> {
       statusMap = result;
     });
 
-    // Delay nhỏ trước khi trigger explosion animation
     await Future.delayed(const Duration(milliseconds: 200));
 
-    setState(() {
-      showContent = true;
-    });
+    if (!mounted) return;
+    setState(() => showContent = true);
   }
 
   bool isSameWebsiteList(List<Website> a, List<Website> b) {
