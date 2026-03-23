@@ -1,6 +1,7 @@
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 import '../models/website.dart';
 import 'glass_card.dart';
 import 'iframe_view.dart';
@@ -19,6 +20,7 @@ class _WebsiteCardState extends State<WebsiteCard>
     with SingleTickerProviderStateMixin {
   bool hover = false;
   bool copied = false;
+  bool _visible = false;
   late AnimationController _borderController;
 
   @override
@@ -75,6 +77,11 @@ class _WebsiteCardState extends State<WebsiteCard>
     });
   }
 
+  // 🔥 Đảm bảo URL có https://
+  String getThumbnail(String url) {
+    return 'http://192.168.122.16:9095/api/screenshot?url=$url';
+  }
+
   @override
   Widget build(BuildContext context) {
     final w = widget.website;
@@ -86,179 +93,220 @@ class _WebsiteCardState extends State<WebsiteCard>
     final borderRadius = isMobile ? 12.0 : 18.0;
     final padding = isMobile ? 10.0 : 14.0;
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => hover = true),
-      onExit: (_) => setState(() => hover = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        transform: Matrix4.identity()
-          ..translate(0, hover ? (isMobile ? -2 : -6) : 0)
-          ..scale(hover ? 1.02 : 1),
-        child: GestureDetector(
-          onTap: () => html.window.open(w.url, "_blank"),
-          child: Stack(
-            children: [
-              /// ===== Animated border =====
-              if (widget.isAlive == true)
-                Positioned.fill(
-                  child: AnimatedBuilder(
-                    animation: _borderController,
-                    builder: (_, __) {
-                      return Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(borderRadius),
-                          gradient: SweepGradient(
-                            transform: GradientRotation(
-                              _borderController.value * 6.28,
+    return VisibilityDetector(
+      key: Key('card-${w.url}'),
+      onVisibilityChanged: (info) {
+        // 🔥 Chỉ load khi card hiện > 10% trên màn hình
+        if (info.visibleFraction > 0.1 && !_visible) {
+          setState(() => _visible = true);
+        }
+      },
+      child: MouseRegion(
+        onEnter: (_) => setState(() => hover = true),
+        onExit: (_) => setState(() => hover = false),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          transform: Matrix4.identity()
+            ..translate(0, hover ? (isMobile ? -2 : -6) : 0)
+            ..scale(hover ? 1.02 : 1),
+          child: GestureDetector(
+            onTap: () => html.window.open(w.url, "_blank"),
+            child: Stack(
+              children: [
+                /// ===== Animated border =====
+                if (widget.isAlive == true)
+                  Positioned.fill(
+                    child: AnimatedBuilder(
+                      animation: _borderController,
+                      builder: (_, __) {
+                        return Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(borderRadius),
+                            gradient: SweepGradient(
+                              transform: GradientRotation(
+                                _borderController.value * 6.28,
+                              ),
+                              colors: const [
+                                Color(0xFF22C55E),
+                                Color(0xFF3B82F6),
+                                Color(0xFF8B5CF6),
+                                Color(0xFFF59E0B),
+                                Color(0xFF22C55E),
+                              ],
                             ),
-                            colors: const [
-                              Color(0xFF22C55E),
-                              Color(0xFF3B82F6),
-                              Color(0xFF8B5CF6),
-                              Color(0xFFF59E0B),
-                              Color(0xFF22C55E),
-                            ],
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
-                ),
 
-              /// ===== Card content =====
-              Padding(
-                padding: EdgeInsets.all(widget.isAlive == true ? 1.2 : 0),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(borderRadius - 1),
-                  child: Container(
-                    decoration: const BoxDecoration(color: Color(0xFF0B132B)),
-                    child: Stack(
-                      children: [
-                        /// ===== IFRAME (desktop only) =====
-                        if (!isMobile)
-                          AnimatedOpacity(
-                            duration: const Duration(milliseconds: 300),
-                            opacity: hover ? 1 : 0,
-                            child: hover
-                                ? IframeView(url: w.url)
-                                : const SizedBox(),
-                          ),
+                /// ===== Card content =====
+                Padding(
+                  padding: EdgeInsets.all(widget.isAlive == true ? 1.2 : 0),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(borderRadius - 1),
+                    child: Container(
+                      decoration: const BoxDecoration(color: Color(0xFF0B132B)),
+                      child: Stack(
+                        children: [
+                          /// ===== IFRAME (desktop only) =====
+                          if (!isMobile)
+                            AnimatedOpacity(
+                              duration: const Duration(milliseconds: 300),
+                              opacity: hover ? 1 : 0,
+                              child: hover
+                                  ? IframeView(url: w.url)
+                                  : const SizedBox(),
+                            ),
 
-                        /// overlay
-                        Positioned.fill(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Colors.black.withOpacity(0.7),
-                                  Colors.black.withOpacity(0.2),
-                                ],
-                                begin: Alignment.bottomCenter,
-                                end: Alignment.topCenter,
+                          /// ===== THUMBNAIL =====
+                          if (!isMobile && _visible && !hover)
+                            Positioned(
+                              right: 8,
+                              bottom: 8,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: Container(
+                                  width: 120, // ~ 1/4 card
+                                  height: 80,
+                                  decoration: BoxDecoration(
+                                    color: Colors.black,
+                                    border: Border.all(
+                                      color: Colors.white.withOpacity(0.1),
+                                    ),
+                                  ),
+                                  child: Image.network(
+                                    getThumbnail(w.url),
+                                    fit: BoxFit.cover,
+                                    loadingBuilder: (_, child, progress) {
+                                      if (progress == null) return child;
+                                      return const SizedBox();
+                                    },
+                                    errorBuilder: (_, __, ___) =>
+                                        const SizedBox(),
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                          /// overlay
+                          Positioned.fill(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.black.withOpacity(0.7),
+                                    Colors.black.withOpacity(0.2),
+                                  ],
+                                  begin: Alignment.bottomCenter,
+                                  end: Alignment.topCenter,
+                                ),
                               ),
                             ),
                           ),
-                        ),
 
-                        /// ===== CONTENT =====
-                        Padding(
-                          padding: EdgeInsets.all(padding),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              /// ===== HEADER =====
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      w.name,
+                          /// ===== CONTENT =====
+                          Padding(
+                            padding: EdgeInsets.all(padding),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                /// ===== HEADER =====
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        w.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: isMobile
+                                              ? 15
+                                              : (isTablet ? 17 : 19),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    _buildStatus(isMobile),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 6),
+
+                                /// URL
+                                Text(
+                                  w.url,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: const Color(0xFF9CA3AF),
+                                    fontSize: isMobile ? 11 : 13,
+                                  ),
+                                ),
+
+                                const SizedBox(height: 10),
+
+                                /// TYPE
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: getTypeColor(
+                                      w.type,
+                                    ).withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    w.type,
+                                    style: TextStyle(
+                                      color: getTypeColor(w.type),
+                                      fontSize: isMobile ? 9 : 11,
+                                    ),
+                                  ),
+                                ),
+
+                                /// ===== FLEXIBLE SPACE =====
+                                const Expanded(child: SizedBox()),
+
+                                /// ===== FOOTER =====
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      w.departmentName,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: isMobile
-                                            ? 15
-                                            : (isTablet ? 17 : 19),
-                                        fontWeight: FontWeight.bold,
+                                        color: const Color(0xFF6B7280),
+                                        fontSize: isMobile ? 12 : 14,
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  _buildStatus(isMobile),
-                                ],
-                              ),
 
-                              const SizedBox(height: 6),
+                                    const SizedBox(height: 6),
 
-                              /// URL
-                              Text(
-                                w.url,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: const Color(0xFF9CA3AF),
-                                  fontSize: isMobile ? 11 : 13,
-                                ),
-                              ),
-
-                              const SizedBox(height: 10),
-
-                              /// TYPE
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: getTypeColor(w.type).withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(
-                                  w.type,
-                                  style: TextStyle(
-                                    color: getTypeColor(w.type),
-                                    fontSize: isMobile ? 9 : 11,
-                                  ),
-                                ),
-                              ),
-
-                              /// ===== FLEXIBLE SPACE =====
-                              const Expanded(child: SizedBox()),
-
-                              /// ===== FOOTER =====
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    w.departmentName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: const Color(0xFF6B7280),
-                                      fontSize: isMobile ? 12 : 14,
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        _copyBtn(isMobile),
+                                        _openBtn(isMobile),
+                                      ],
                                     ),
-                                  ),
-
-                                  const SizedBox(height: 6),
-
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.end,
-                                    children: [
-                                      _copyBtn(isMobile),
-                                      _openBtn(isMobile),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ],
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
