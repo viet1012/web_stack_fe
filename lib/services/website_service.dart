@@ -39,6 +39,7 @@ class WebsiteService {
   // CHECK WEB ACTIVE
   static Map<String, bool> _cache = {};
   static DateTime? _lastFetch;
+  static const int _cacheSeconds = 300; // ?? ch?nh ? dây
 
   static Future<Map<String, bool>> checkBatch(
     List<String> urls, {
@@ -47,7 +48,7 @@ class WebsiteService {
     try {
       if (!force &&
           _lastFetch != null &&
-          DateTime.now().difference(_lastFetch!).inSeconds < 10) {
+          DateTime.now().difference(_lastFetch!).inSeconds < _cacheSeconds) {
         return _cache;
       }
 
@@ -60,7 +61,7 @@ class WebsiteService {
 
       return result;
     } catch (e) {
-      return _cache; // 🔥 fallback cache thay vì {}
+      return _cache; // gi? tr?ng thái cu
     }
   }
 
