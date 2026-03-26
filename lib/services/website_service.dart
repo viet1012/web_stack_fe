@@ -6,8 +6,8 @@ import 'package:dio/dio.dart';
 class WebsiteService {
   static final Dio dio = Dio(
     BaseOptions(
-      // baseUrl: 'http://localhost:9999',
-      baseUrl: 'http://192.168.122.16:9095',
+      baseUrl: 'http://localhost:9999',
+      // baseUrl: 'http://192.168.122.16:9095',
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 10),
       headers: {'Content-Type': 'application/json'},
@@ -40,11 +40,14 @@ class WebsiteService {
   static Map<String, bool> _cache = {};
   static DateTime? _lastFetch;
 
-  static Future<Map<String, bool>> checkBatch(List<String> urls) async {
+  static Future<Map<String, bool>> checkBatch(
+    List<String> urls, {
+    bool force = false,
+  }) async {
     try {
-      // 🔥 cache 30s
-      if (_lastFetch != null &&
-          DateTime.now().difference(_lastFetch!).inSeconds < 30) {
+      if (!force &&
+          _lastFetch != null &&
+          DateTime.now().difference(_lastFetch!).inSeconds < 10) {
         return _cache;
       }
 
@@ -57,7 +60,7 @@ class WebsiteService {
 
       return result;
     } catch (e) {
-      return {};
+      return _cache; // 🔥 fallback cache thay vì {}
     }
   }
 
