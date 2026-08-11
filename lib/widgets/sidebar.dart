@@ -78,30 +78,66 @@ class _SidebarState extends State<Sidebar> {
               children: [
                 const SizedBox(height: 20),
 
-                /// 🔥 HEADER
-                Row(
-                  mainAxisAlignment: collapsed
-                      ? MainAxisAlignment.center
-                      : MainAxisAlignment.spaceBetween,
-                  children: [
-                    if (!collapsed)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 16),
-                        child: AnimatedLogo(),
+                if (collapsed)
+                  SizedBox(
+                    height: 40,
+                    child: Center(
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 40,
+                          minHeight: 40,
+                        ),
+                        icon: const Icon(
+                          Icons.menu,
+                          color: Color(0xFF94A3B8),
+                          size: 22,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            collapsed = false;
+                          });
+                        },
                       ),
-                    IconButton(
-                      icon: Icon(
-                        collapsed ? Icons.menu : Icons.menu_open,
-                        color: const Color(0xFF94A3B8),
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          collapsed = !collapsed;
-                        });
-                      },
                     ),
-                  ],
-                ),
+                  )
+                else
+                  SizedBox(
+                    height: 40,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          const Expanded(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: AnimatedLogo(),
+                            ),
+                          ),
+
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 40,
+                            ),
+                            icon: const Icon(
+                              Icons.menu_open,
+                              color: Color(0xFF94A3B8),
+                              size: 22,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                collapsed = true;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
 
                 const SizedBox(height: 10),
 

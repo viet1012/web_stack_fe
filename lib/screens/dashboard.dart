@@ -16,122 +16,448 @@ class Dashboard extends StatefulWidget {
 }
 
 class _DashboardState extends State<Dashboard> {
+  // ============================================================
+  // DATA
+  // ============================================================
+
   List<Website> all = [];
+
   String selectedDepartment = "ALL";
-  bool loading = true;
-  bool showContent = false;
+
   String sortType = "type";
+
   bool isTreeMode = false;
+
   Map<String, bool> statusMap = {};
+
+  // ============================================================
+  // LOADING STATE
+  // ============================================================
+
+  bool loading = true;
+
+  bool showContent = false;
+
+  bool _refreshing = false;
+
+  bool _checkingStatus = false;
+
+  // ============================================================
+  // TIMER
+  // ============================================================
 
   Timer? _refreshTimer;
 
-  // 🔥 Chỉ check lại URLs đang bị lỗi + URLs mới
+  static const Duration _refreshInterval =
+  Duration(seconds: 60);
+
+  // ============================================================
+  // REQUEST VERSION
+  //
+  // Dùng để bỏ response cũ nếu screen dispose / request mới hơn.
+  // ============================================================
+
+  int _requestVersion = 0;
+
+  // ============================================================
+  // URL STATE
+  // ============================================================
+
+  /// Chỉ check lại:
+  /// - URL đang lỗi
+  /// - URL mới
   Set<String> _failedUrls = {};
+
+  // ============================================================
+  // INIT
+  // ============================================================
 
   @override
   void initState() {
     super.initState();
-    load();
+
+    _initialLoad();
+
     _startSmartRefresh();
   }
 
+  // ============================================================
+  // DISPOSE
+  // ============================================================
+
   @override
   void dispose() {
+    _requestVersion++;
+
     _refreshTimer?.cancel();
+    _refreshTimer = null;
+
     super.dispose();
   }
 
+  // ============================================================
+  // REFRESH TIMER
+  // ============================================================
+
   void _startSmartRefresh() {
+    _refreshTimer?.cancel();
+
     _refreshTimer = Timer.periodic(
-      const Duration(seconds: 60),
-      (_) => _refresh(),
+      _refreshInterval,
+          (_) {
+        if (!mounted) {
+          return;
+        }
+
+        if (_refreshing) {
+          return;
+        }
+
+        _refresh();
+      },
     );
   }
 
-  Future<void> _refresh() async {
-    try {
-      final data = await WebsiteService.fetchWebsites();
+  // ============================================================
+  // INITIAL LOAD
+  //
+  // Quan trọng:
+  // 1. Load danh sách website
+  // 2. Hiện UI NGAY
+  // 3. Check status background
+  // ============================================================
 
-      // 🔥 Tìm URLs mới (chưa có trong statusMap)
-      final newUrls = data
-          .map((e) => e.url)
-          .where((url) => !statusMap.containsKey(url))
-          .toSet();
-
-      // 🔥 Chỉ check: URLs lỗi + URLs mới (không check lại toàn bộ)
-      final urlsToCheck = {..._failedUrls, ...newUrls}.toList();
-
-      final partialResult = urlsToCheck.isNotEmpty
-          ? await WebsiteService.checkBatch(urlsToCheck)
-          : <String, bool>{};
-
-      if (!mounted) return;
-
-      // 🔥 Merge vào map hiện tại
-      final updatedMap = Map<String, bool>.from(statusMap)
-        ..addAll(partialResult);
-
-      // 🔥 Cập nhật danh sách URL đang fail để check lại lần sau
-      _failedUrls = updatedMap.entries
-          .where((e) => e.value == false)
-          .map((e) => e.key)
-          .toSet();
-
-      final isSameList = isSameWebsiteList(all, data);
-      final isSameMap = isSameStatus(statusMap, updatedMap);
-
-      if (!isSameList || !isSameMap) {
-        setState(() {
-          if (!isSameList) all = data;
-          if (!isSameMap) statusMap = updatedMap;
-        });
-      }
-    } catch (e) {
-      debugPrint('Refresh error: $e');
+  Future<void> _initialLoad() async {
+    if (!mounted) {
+      return;
     }
-  }
 
-  Future<void> load() async {
+    final requestVersion =
+    ++_requestVersion;
+
     setState(() {
       loading = true;
       showContent = false;
     });
 
-    final data = await WebsiteService.fetchWebsites();
-    final urls = data.map((e) => e.url).toList();
-    final result = await WebsiteService.checkBatch(urls);
+    try {
+      // ========================================================
+      // 1. FETCH WEBSITE LIST
+      // ========================================================
 
-    _failedUrls = result.entries
-        .where((e) => e.value == false)
-        .map((e) => e.key)
-        .toSet();
+      final data =
+      await WebsiteService.fetchWebsites();
 
-    await Future.delayed(const Duration(milliseconds: 1000));
+      if (!_isValidRequest(requestVersion)) {
+        return;
+      }
 
-    if (!mounted) return;
+      // ========================================================
+      // 2. HIỆN UI NGAY
+      //
+      // Không đợi check-batch.
+      // ========================================================
 
-    setState(() {
-      all = data;
-      loading = false;
-      statusMap = result;
-    });
+      setState(() {
+        all = data;
 
-    await Future.delayed(const Duration(milliseconds: 200));
+        loading = false;
 
-    if (!mounted) return;
-    setState(() => showContent = true);
+        showContent = true;
+      });
+
+      // ========================================================
+      // 3. CHECK ONLINE/OFFLINE BACKGROUND
+      // ========================================================
+
+      await _checkInitialStatuses(
+        data,
+        requestVersion,
+      );
+    } catch (e, stackTrace) {
+      debugPrint(
+        '[INITIAL LOAD ERROR] $e',
+      );
+
+      debugPrintStack(
+        stackTrace: stackTrace,
+      );
+
+      if (!_isValidRequest(requestVersion)) {
+        return;
+      }
+
+      setState(() {
+        loading = false;
+
+        // Cho UI vẫn render thay vì bị kẹt Rocket.
+        showContent = true;
+      });
+    }
   }
 
-  bool isSameWebsiteList(List<Website> a, List<Website> b) {
-    if (a.length != b.length) return false;
+  // ============================================================
+  // INITIAL STATUS CHECK
+  // ============================================================
+
+  Future<void> _checkInitialStatuses(
+      List<Website> data,
+      int requestVersion,
+      ) async {
+    if (_checkingStatus) {
+      return;
+    }
+
+    final urls = data
+        .map((e) => e.url.trim())
+        .where((url) => url.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+
+    if (urls.isEmpty) {
+      return;
+    }
+
+    _checkingStatus = true;
+
+    try {
+      final result =
+      await WebsiteService.checkBatch(
+        urls,
+
+        // Lần đầu nên check thật.
+        force: true,
+      );
+
+      if (!_isValidRequest(requestVersion)) {
+        return;
+      }
+
+      _failedUrls =
+          result.entries
+              .where(
+                (e) => e.value == false,
+          )
+              .map(
+                (e) => e.key,
+          )
+              .toSet();
+
+      if (!isSameStatus(
+        statusMap,
+        result,
+      )) {
+        setState(() {
+          statusMap = result;
+        });
+      }
+    } catch (e) {
+      debugPrint(
+        '[INITIAL STATUS ERROR] $e',
+      );
+    } finally {
+      _checkingStatus = false;
+    }
+  }
+
+  // ============================================================
+  // SMART REFRESH
+  //
+  // Mỗi 60 giây:
+  // - fetch website list
+  // - tìm URL mới
+  // - re-check URL đang fail
+  // - không check lại URL đang OK
+  // ============================================================
+
+  Future<void> _refresh() async {
+    if (!mounted || _refreshing) {
+      return;
+    }
+
+    _refreshing = true;
+
+    final requestVersion =
+    ++_requestVersion;
+
+    try {
+      // ========================================================
+      // 1. LOAD LẠI LIST
+      // ========================================================
+
+      final data =
+      await WebsiteService.fetchWebsites();
+
+      if (!_isValidRequest(requestVersion)) {
+        return;
+      }
+
+      // ========================================================
+      // 2. URL HIỆN TẠI
+      // ========================================================
+
+      final currentUrls = data
+          .map((e) => e.url.trim())
+          .where((url) => url.isNotEmpty)
+          .toSet();
+
+      // ========================================================
+      // 3. URL MỚI
+      //
+      // URL chưa từng có trong statusMap.
+      // ========================================================
+
+      final newUrls = currentUrls
+          .where(
+            (url) =>
+        !statusMap.containsKey(url),
+      )
+          .toSet();
+
+      // ========================================================
+      // 4. URL CẦN CHECK
+      //
+      // Chỉ:
+      // - đang fail
+      // - mới
+      // ========================================================
+
+      final urlsToCheck = {
+        ..._failedUrls.where(
+          currentUrls.contains,
+        ),
+        ...newUrls,
+      }.toList(growable: false);
+
+      Map<String, bool> partialResult =
+      const {};
+
+      if (urlsToCheck.isNotEmpty) {
+        partialResult =
+        await WebsiteService.checkBatch(
+          urlsToCheck,
+
+          // Quan trọng:
+          // bỏ cache 5 phút khi đang re-check URL fail.
+          force: true,
+        );
+      }
+
+      if (!_isValidRequest(requestVersion)) {
+        return;
+      }
+
+      // ========================================================
+      // 5. MERGE STATUS
+      // ========================================================
+
+      final updatedMap =
+      Map<String, bool>.from(
+        statusMap,
+      );
+
+      updatedMap.addAll(
+        partialResult,
+      );
+
+      // ========================================================
+      // 6. XÓA STATUS CỦA WEBSITE ĐÃ BỊ REMOVE
+      // ========================================================
+
+      updatedMap.removeWhere(
+            (url, _) =>
+        !currentUrls.contains(url),
+      );
+
+      // ========================================================
+      // 7. UPDATE FAILED URL LIST
+      // ========================================================
+
+      _failedUrls =
+          updatedMap.entries
+              .where(
+                (e) => e.value == false,
+          )
+              .map(
+                (e) => e.key,
+          )
+              .toSet();
+
+      // ========================================================
+      // 8. CHỈ SETSTATE KHI CÓ THAY ĐỔI
+      // ========================================================
+
+      final listChanged =
+      !isSameWebsiteList(
+        all,
+        data,
+      );
+
+      final statusChanged =
+      !isSameStatus(
+        statusMap,
+        updatedMap,
+      );
+
+      if (listChanged ||
+          statusChanged) {
+        setState(() {
+          if (listChanged) {
+            all = data;
+          }
+
+          if (statusChanged) {
+            statusMap = updatedMap;
+          }
+        });
+      }
+    } catch (e, stackTrace) {
+      debugPrint(
+        '[REFRESH ERROR] $e',
+      );
+
+      debugPrintStack(
+        stackTrace: stackTrace,
+      );
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  // ============================================================
+  // REQUEST VALIDATION
+  // ============================================================
+
+  bool _isValidRequest(
+      int requestVersion,
+      ) {
+    return mounted &&
+        requestVersion == _requestVersion;
+  }
+
+  // ============================================================
+  // COMPARE WEBSITE LIST
+  // ============================================================
+
+  bool isSameWebsiteList(
+      List<Website> a,
+      List<Website> b,
+      ) {
+    if (a.length != b.length) {
+      return false;
+    }
 
     for (int i = 0; i < a.length; i++) {
-      if (a[i].id != b[i].id ||
-          a[i].name != b[i].name ||
-          a[i].url != b[i].url ||
-          a[i].type != b[i].type ||
-          a[i].departmentName != b[i].departmentName) {
+      final oldItem = a[i];
+
+      final newItem = b[i];
+
+      if (oldItem.id != newItem.id ||
+          oldItem.name != newItem.name ||
+          oldItem.url != newItem.url ||
+          oldItem.type != newItem.type ||
+          oldItem.departmentName !=
+              newItem.departmentName) {
         return false;
       }
     }
@@ -139,229 +465,495 @@ class _DashboardState extends State<Dashboard> {
     return true;
   }
 
-  bool isSameStatus(Map<String, bool> a, Map<String, bool> b) {
-    if (a.length != b.length) return false;
+  // ============================================================
+  // COMPARE STATUS
+  // ============================================================
+
+  bool isSameStatus(
+      Map<String, bool> a,
+      Map<String, bool> b,
+      ) {
+    if (a.length != b.length) {
+      return false;
+    }
 
     for (final key in a.keys) {
-      if (a[key] != b[key]) return false;
+      if (a[key] != b[key]) {
+        return false;
+      }
     }
 
     return true;
   }
 
-  /// 🔥 Department list
+  // ============================================================
+  // DEPARTMENTS
+  // ============================================================
+
   List<String> get departments {
-    final set = all.map((e) => e.departmentName).toSet();
-    return ["ALL", ...set];
+    final set = all
+        .map(
+          (e) => e.departmentName,
+    )
+        .where(
+          (e) => e.trim().isNotEmpty,
+    )
+        .toSet()
+        .toList();
+
+    set.sort();
+
+    return [
+      "ALL",
+      ...set,
+    ];
   }
 
-  /// 🔥 Filter + Sort
+  // ============================================================
+  // FILTERED
+  // ============================================================
+
   List<Website> get filtered {
-    List<Website> list = selectedDepartment == "ALL"
-        ? List.from(all)
-        : all.where((e) => e.departmentName == selectedDepartment).toList();
+    final List<Website> list;
+
+    if (selectedDepartment == "ALL") {
+      list =
+      List<Website>.from(all);
+    } else {
+      list = all
+          .where(
+            (e) =>
+        e.departmentName ==
+            selectedDepartment,
+      )
+          .toList();
+    }
 
     if (sortType == "type") {
-      list.sort((a, b) => a.type.compareTo(b.type));
+      list.sort(
+            (a, b) {
+          final typeCompare =
+          a.type.compareTo(
+            b.type,
+          );
+
+          if (typeCompare != 0) {
+            return typeCompare;
+          }
+
+          return a.name.compareTo(
+            b.name,
+          );
+        },
+      );
     }
 
     return list;
   }
 
-  /// 🔥 Group theo TYPE (cho Tree)
-  Map<String, List<Website>> groupByType(List<Website> data) {
-    final Map<String, List<Website>> result = {};
+  // ============================================================
+  // GROUP BY TYPE
+  // ============================================================
 
-    for (var w in data) {
-      result.putIfAbsent(w.type, () => []);
-      result[w.type]!.add(w);
+  Map<String, List<Website>> groupByType(
+      List<Website> data,
+      ) {
+    final result =
+    <String, List<Website>>{};
+
+    for (final website in data) {
+      result
+          .putIfAbsent(
+        website.type,
+            () => <Website>[],
+      )
+          .add(website);
     }
 
     return result;
   }
 
-  /// 🔥 TREE VIEW UI
-  Widget buildTree(List<Website> data) {
-    final grouped = groupByType(data);
+  // ============================================================
+  // TREE VIEW
+  // ============================================================
+
+  Widget buildTree(
+      List<Website> data,
+      ) {
+    final grouped =
+    groupByType(data);
 
     return ListView(
-      children: grouped.entries.map((entry) {
-        final type = entry.key;
-        final list = entry.value;
+      children:
+      grouped.entries.map(
+            (entry) {
+          final type =
+              entry.key;
 
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.03),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white10),
-          ),
-          child: ExpansionTile(
-            collapsedIconColor: Colors.white70,
-            iconColor: Colors.blue,
-            title: Row(
-              children: [
-                /// 🔥 Type badge
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(type, style: const TextStyle(color: Colors.blue)),
-                ),
+          final list =
+              entry.value;
 
-                const SizedBox(width: 10),
-
-                /// 🔥 Count
-                Text(
-                  "(${list.length})",
-                  style: const TextStyle(color: Colors.white70),
-                ),
-              ],
+          return Container(
+            margin:
+            const EdgeInsets.only(
+              bottom: 12,
             ),
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final width = constraints.maxWidth;
-
-                    double itemWidth;
-
-                    if (width < 600) {
-                      itemWidth = width; // full mobile
-                    } else if (width < 1000) {
-                      itemWidth = width / 2 - 16;
-                    } else {
-                      itemWidth = 260;
-                    }
-
-                    return Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: list.map((w) {
-                        return SizedBox(
-                          width: itemWidth,
-                          child: AspectRatio(
-                            aspectRatio: 1.4,
-                            child: WebsiteCard(
-                              website: w,
-                              isAlive: statusMap[w.url],
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    );
-                  },
-                ),
+            decoration:
+            BoxDecoration(
+              color: Colors.white
+                  .withOpacity(
+                0.03,
               ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
+              borderRadius:
+              BorderRadius.circular(
+                12,
+              ),
+              border: Border.all(
+                color:
+                Colors.white10,
+              ),
+            ),
+            child: ExpansionTile(
+              collapsedIconColor:
+              Colors.white70,
 
-  /// 🔥 TOOLBAR
-  Widget buildToolbar() {
-    final width = MediaQuery.of(context).size.width;
-    final isMobile = width < 600;
+              iconColor:
+              Colors.blue,
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        /// 🔥 MAIN ROW
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            /// LEFT: ICON + TITLE
-            Expanded(
-              child: Row(
+              title: Row(
                 children: [
-                  Icon(
-                    Icons.travel_explore,
-                    size: isMobile ? 16 : 28,
-                    color: Color(0xFF3B82F6),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      "WEBSITE DASHBOARD",
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: isMobile ? 16 : 24,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.2,
+                  Container(
+                    padding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration:
+                    BoxDecoration(
+                      color: Colors.blue
+                          .withOpacity(
+                        0.15,
                       ),
+                      borderRadius:
+                      BorderRadius.circular(
+                        20,
+                      ),
+                    ),
+                    child: Text(
+                      type,
+                      style:
+                      const TextStyle(
+                        color:
+                        Colors.blue,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(
+                    width: 10,
+                  ),
+
+                  Text(
+                    "(${list.length})",
+                    style:
+                    const TextStyle(
+                      color:
+                      Colors.white70,
                     ),
                   ),
                 ],
               ),
+
+              children: [
+                Padding(
+                  padding:
+                  const EdgeInsets.all(
+                    12,
+                  ),
+                  child:
+                  LayoutBuilder(
+                    builder:
+                        (
+                        context,
+                        constraints,
+                        ) {
+                      final width =
+                          constraints
+                              .maxWidth;
+
+                      double itemWidth;
+
+                      if (width < 600) {
+                        itemWidth =
+                            width;
+                      } else if (width <
+                          1000) {
+                        itemWidth =
+                            width / 2 -
+                                16;
+                      } else {
+                        itemWidth =
+                        260;
+                      }
+
+                      return Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+
+                        children:
+                        list.map(
+                              (w) {
+                            return SizedBox(
+                              width:
+                              itemWidth,
+
+                              child:
+                              AspectRatio(
+                                aspectRatio:
+                                1.4,
+
+                                child:
+                                WebsiteCard(
+                                  website:
+                                  w,
+
+                                  isAlive:
+                                  statusMap[
+                                  w.url],
+                                ),
+                              ),
+                            );
+                          },
+                        ).toList(),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
+          );
+        },
+      ).toList(),
+    );
+  }
 
-            /// RIGHT: ACTIONS
-            Flexible(
-              child: Align(
-                alignment: Alignment.topRight,
-                child: Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    _buildBtn(
-                      icon: Icons.sort,
-                      label: "Sort",
-                      active: sortType == "type",
-                      activeColor: Colors.blue,
-                      isMobile: isMobile,
-                      onTap: () {
-                        setState(() {
-                          sortType = sortType == "type" ? "none" : "type";
-                        });
-                      },
-                    ),
+  // ============================================================
+  // TOOLBAR
+  // ============================================================
 
-                    _buildBtn(
-                      icon: isTreeMode ? Icons.grid_view : Icons.account_tree,
-                      label: isTreeMode ? "Grid" : "Tree",
-                      active: isTreeMode,
-                      activeColor: Colors.green,
-                      isMobile: isMobile,
-                      onTap: () {
-                        setState(() {
-                          isTreeMode = !isTreeMode;
-                        });
-                      },
-                    ),
+  Widget buildToolbar() {
+    final width =
+        MediaQuery.of(context)
+            .size
+            .width;
 
-                    _buildBtn(
-                      icon: Icons.hub,
-                      label: "Ports",
-                      active: true,
-                      activeColor: Colors.purple,
-                      isMobile: isMobile,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => PortScreen(websites: all),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+    final isMobile =
+        width < 600;
+
+    return Row(
+      crossAxisAlignment:
+      CrossAxisAlignment.center,
+      children: [
+        // ========================================================
+        // TITLE
+        // ========================================================
+
+        Expanded(
+          child: Row(
+            children: [
+              Icon(
+                Icons.travel_explore,
+                size:
+                isMobile
+                    ? 16
+                    : 28,
+                color:
+                const Color(
+                  0xFF3B82F6,
                 ),
               ),
-            ),
-          ],
+
+              const SizedBox(
+                width: 8,
+              ),
+
+              Expanded(
+                child: Text(
+                  "WEBSITE DASHBOARD",
+                  style:
+                  TextStyle(
+                    color:
+                    Colors.white,
+
+                    fontSize:
+                    isMobile
+                        ? 16
+                        : 24,
+
+                    fontWeight:
+                    FontWeight.bold,
+
+                    letterSpacing:
+                    1.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // ========================================================
+        // ACTIONS
+        // ========================================================
+
+        Flexible(
+          child: Wrap(
+            alignment:
+            WrapAlignment.end,
+
+            spacing: 10,
+
+            runSpacing: 10,
+
+            children: [
+              // ==================================================
+              // SORT
+              // ==================================================
+
+              _buildBtn(
+                icon:
+                Icons.sort,
+
+                label:
+                "Sort",
+
+                active:
+                sortType ==
+                    "type",
+
+                activeColor:
+                Colors.blue,
+
+                isMobile:
+                isMobile,
+
+                onTap: () {
+                  setState(() {
+                    sortType =
+                    sortType ==
+                        "type"
+                        ? "none"
+                        : "type";
+                  });
+                },
+              ),
+
+              // ==================================================
+              // GRID / TREE
+              // ==================================================
+
+              _buildBtn(
+                icon:
+                isTreeMode
+                    ? Icons.grid_view
+                    : Icons
+                    .account_tree,
+
+                label:
+                isTreeMode
+                    ? "Grid"
+                    : "Tree",
+
+                active:
+                isTreeMode,
+
+                activeColor:
+                Colors.green,
+
+                isMobile:
+                isMobile,
+
+                onTap: () {
+                  setState(() {
+                    isTreeMode =
+                    !isTreeMode;
+                  });
+                },
+              ),
+
+              // ==================================================
+              // PORTS
+              // ==================================================
+
+              _buildBtn(
+                icon:
+                Icons.hub,
+
+                label:
+                "Ports",
+
+                active:
+                true,
+
+                activeColor:
+                Colors.purple,
+
+                isMobile:
+                isMobile,
+
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder:
+                          (_) =>
+                          PortScreen(
+                            websites:
+                            all,
+                          ),
+                    ),
+                  );
+                },
+              ),
+
+              // ==================================================
+              // MANUAL REFRESH
+              // ==================================================
+
+              _buildBtn(
+                icon:
+                Icons.refresh_rounded,
+
+                label:
+                _refreshing
+                    ? "Refreshing"
+                    : "Refresh",
+
+                active:
+                _refreshing,
+
+                activeColor:
+                Colors.orange,
+
+                isMobile:
+                isMobile,
+
+                onTap: () {
+                  if (!_refreshing) {
+                    _refresh();
+                  }
+                },
+              ),
+            ],
+          ),
         ),
       ],
     );
   }
+
+  // ============================================================
+  // BUTTON
+  // ============================================================
 
   Widget _buildBtn({
     required IconData icon,
@@ -371,31 +963,93 @@ class _DashboardState extends State<Dashboard> {
     required bool isMobile,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
+
+      borderRadius:
+      BorderRadius.circular(
+        20,
+      ),
+
       child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: isMobile ? 10 : 12,
-          vertical: isMobile ? 5 : 6,
+        padding:
+        EdgeInsets.symmetric(
+          horizontal:
+          isMobile
+              ? 10
+              : 12,
+
+          vertical:
+          isMobile
+              ? 5
+              : 6,
         ),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          color: active ? activeColor.withOpacity(0.2) : Colors.white10,
+
+        decoration:
+        BoxDecoration(
+          borderRadius:
+          BorderRadius.circular(
+            20,
+          ),
+
+          color:
+          active
+              ? activeColor
+              .withOpacity(
+            0.2,
+          )
+              : Colors.white10,
+
+          border:
+          Border.all(
+            color:
+            active
+                ? activeColor
+                .withOpacity(
+              .3,
+            )
+                : Colors
+                .transparent,
+          ),
         ),
+
         child: Row(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize:
+          MainAxisSize.min,
+
           children: [
             Icon(
               icon,
-              size: isMobile ? 14 : 16,
-              color: active ? activeColor : Colors.white70,
+
+              size:
+              isMobile
+                  ? 14
+                  : 16,
+
+              color:
+              active
+                  ? activeColor
+                  : Colors.white70,
             ),
-            const SizedBox(width: 6),
+
+            const SizedBox(
+              width: 6,
+            ),
+
             Text(
               label,
-              style: TextStyle(
-                fontSize: isMobile ? 12 : 14,
-                color: active ? activeColor : Colors.white70,
+
+              style:
+              TextStyle(
+                fontSize:
+                isMobile
+                    ? 12
+                    : 14,
+
+                color:
+                active
+                    ? activeColor
+                    : Colors.white70,
               ),
             ),
           ],
@@ -404,93 +1058,111 @@ class _DashboardState extends State<Dashboard> {
     );
   }
 
+  // ============================================================
+  // BUILD
+  // ============================================================
+
   @override
-  Widget build(BuildContext context) {
-    final data = filtered;
+  Widget build(
+      BuildContext context,
+      ) {
+    final data =
+        filtered;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor:
+      const Color(
+        0xFF0F172A,
+      ),
+
       body: Stack(
         children: [
-          // 🔥 MAIN CONTENT với Explosion Animation
+          // ======================================================
+          // MAIN CONTENT
+          // ======================================================
+
           ExplodeTransition(
-            show: showContent,
+            show:
+            showContent,
+
             child: Row(
               children: [
-                /// 🔥 SIDEBAR
+                // =================================================
+                // SIDEBAR
+                // =================================================
+
                 Sidebar(
-                  departments: departments,
-                  selected: selectedDepartment,
-                  onSelect: (v) => setState(() => selectedDepartment = v),
+                  departments:
+                  departments,
+
+                  selected:
+                  selectedDepartment,
+
+                  onSelect:
+                      (value) {
+                    setState(() {
+                      selectedDepartment =
+                          value;
+                    });
+                  },
                 ),
 
-                /// 🔥 MAIN CONTENT
+                // =================================================
+                // CONTENT
+                // =================================================
+
                 Expanded(
                   child: Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+                    padding:
+                    const EdgeInsets.all(
+                      20,
+                    ),
+
+                    decoration:
+                    const BoxDecoration(
+                      gradient:
+                      LinearGradient(
+                        begin:
+                        Alignment
+                            .topLeft,
+
+                        end:
+                        Alignment
+                            .bottomRight,
+
                         colors: [
-                          Color(0xFF0B132B),
-                          Color(0xFF1C2541),
-                          Color(0xFF0F172A),
+                          Color(
+                            0xFF0B132B,
+                          ),
+
+                          Color(
+                            0xFF1C2541,
+                          ),
+
+                          Color(
+                            0xFF0F172A,
+                          ),
                         ],
                       ),
                     ),
+
                     child: Column(
                       children: [
                         buildToolbar(),
-                        const SizedBox(height: 16),
 
-                        /// 🔥 CONTENT SWITCH
+                        const SizedBox(
+                          height: 16,
+                        ),
+
                         Expanded(
-                          child: isTreeMode
-                              ? buildTree(data)
-                              : LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final width = constraints.maxWidth;
-
-                                    int crossAxisCount;
-                                    double childAspectRatio;
-
-                                    if (width < 600) {
-                                      crossAxisCount = 1; // mobile
-                                      childAspectRatio = 1.3;
-                                    } else if (width < 900) {
-                                      crossAxisCount = 2; // tablet nhỏ
-                                      childAspectRatio = 1.35;
-                                    } else if (width < 1200) {
-                                      crossAxisCount = 3; // tablet lớn
-                                      childAspectRatio = 1.4;
-                                    } else if (width < 1600) {
-                                      crossAxisCount = 4; // desktop
-                                      childAspectRatio = 1.45;
-                                    } else {
-                                      crossAxisCount = 5; // màn to
-                                      childAspectRatio = 1.5;
-                                    }
-
-                                    return GridView.builder(
-                                      itemCount: data.length,
-                                      gridDelegate:
-                                          SliverGridDelegateWithFixedCrossAxisCount(
-                                            crossAxisCount: crossAxisCount,
-                                            crossAxisSpacing: 16,
-                                            mainAxisSpacing: 16,
-                                            childAspectRatio: childAspectRatio,
-                                          ),
-                                      itemBuilder: (_, i) {
-                                        final w = data[i];
-                                        return WebsiteCard(
-                                          website: w,
-                                          isAlive: statusMap[w.url],
-                                        );
-                                      },
-                                    );
-                                  },
-                                ),
+                          child:
+                          isTreeMode
+                              ? buildTree(
+                            data,
+                          )
+                              : _buildGrid(
+                            data,
+                          ),
                         ),
                       ],
                     ),
@@ -500,10 +1172,118 @@ class _DashboardState extends State<Dashboard> {
             ),
           ),
 
-          // 🚀 ROCKET LOADING OVERLAY (hiện khi đang load)
-          if (loading) const RocketLoadingScreen(),
+          // ======================================================
+          // ROCKET LOADING
+          //
+          // Chỉ hiện trong lúc fetch danh sách website lần đầu.
+          // Không chờ check status.
+          // ======================================================
+
+          if (loading)
+            const RocketLoadingScreen(),
         ],
       ),
+    );
+  }
+
+  // ============================================================
+  // GRID
+  // ============================================================
+
+  Widget _buildGrid(
+      List<Website> data,
+      ) {
+    if (data.isEmpty) {
+      return const Center(
+        child: Text(
+          'No websites',
+          style: TextStyle(
+            color:
+            Colors.white54,
+            fontSize: 16,
+          ),
+        ),
+      );
+    }
+
+    return LayoutBuilder(
+      builder:
+          (
+          context,
+          constraints,
+          ) {
+        final width =
+            constraints.maxWidth;
+
+        int crossAxisCount;
+
+        double childAspectRatio;
+
+        if (width < 600) {
+          crossAxisCount = 1;
+
+          childAspectRatio =
+          1.3;
+        } else if (width < 900) {
+          crossAxisCount = 2;
+
+          childAspectRatio =
+          1.35;
+        } else if (width < 1200) {
+          crossAxisCount = 3;
+
+          childAspectRatio =
+          1.4;
+        } else if (width < 1600) {
+          crossAxisCount = 4;
+
+          childAspectRatio =
+          1.45;
+        } else {
+          crossAxisCount = 5;
+
+          childAspectRatio =
+          1.5;
+        }
+
+        return GridView.builder(
+          itemCount:
+          data.length,
+
+          gridDelegate:
+          SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount:
+            crossAxisCount,
+
+            crossAxisSpacing:
+            16,
+
+            mainAxisSpacing:
+            16,
+
+            childAspectRatio:
+            childAspectRatio,
+          ),
+
+          itemBuilder:
+              (
+              context,
+              index,
+              ) {
+            final website =
+            data[index];
+
+            return WebsiteCard(
+              website:
+              website,
+
+              isAlive:
+              statusMap[
+              website.url],
+            );
+          },
+        );
+      },
     );
   }
 }
