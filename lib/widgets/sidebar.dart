@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 
+import 'DevTeamBackgroundPainter.dart';
 import 'animated_logo.dart';
 
 class Sidebar extends StatefulWidget {
@@ -46,34 +47,45 @@ class _SidebarState extends State<Sidebar> {
         child: Stack(
           children: [
             /// 🔥 BACKGROUND GRADIENT
-            Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Color(0xFF020617),
-                    Color(0xFF020617),
-                    Color(0xFF020617),
-                    Color(0xFF0F172A),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-            ),
-
-            /// 🔥 GLASS LAYER
-            BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+            /// 1. BACKGROUND
+            Positioned.fill(
               child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.03),
-                  border: const Border(
-                    right: BorderSide(color: Color(0xFF1F2937)),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Color(0xFF020617),
+                      Color(0xFF020617),
+                      Color(0xFF071126),
+                      Color(0xFF0F172A),
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
                   ),
                 ),
               ),
             ),
 
+            /// 2. GLASS
+            Positioned.fill(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(
+                  sigmaX: 12,
+                  sigmaY: 12,
+                ),
+                child: Container(
+                  color: Colors.white.withOpacity(0.015),
+                ),
+              ),
+            ),
+
+            /// 3. DEV TEAM
+            const Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: DevTeamBackgroundPainter(),
+                ),
+              ),
+            ),
             Column(
               children: [
                 const SizedBox(height: 20),

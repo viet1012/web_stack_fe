@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:web_stack/screens/port_screen.dart';
 import '../models/website.dart';
 import '../services/website_service.dart';
+import '../widgets/DashboardBackgroundPainter.dart';
 import '../widgets/rocket_loading_screen.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/website_card.dart';
@@ -1066,25 +1067,51 @@ class _DashboardState extends State<Dashboard> {
   Widget build(
       BuildContext context,
       ) {
-    final data =
-        filtered;
+    final data = filtered;
 
     return Scaffold(
-      backgroundColor:
-      const Color(
-        0xFF0F172A,
-      ),
+      backgroundColor: const Color(0xFF0F172A),
 
       body: Stack(
         children: [
-          // ======================================================
+          // ========================================================
+          // BACKGROUND GRADIENT
+          // ========================================================
+
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF0B132B),
+                    Color(0xFF1C2541),
+                    Color(0xFF0F172A),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ========================================================
+          // DASHBOARD PAINTER
+          // ========================================================
+
+          const Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: DashboardBackgroundPainter(),
+              ),
+            ),
+          ),
+
+          // ========================================================
           // MAIN CONTENT
-          // ======================================================
+          // ========================================================
 
           ExplodeTransition(
-            show:
-            showContent,
-
+            show: showContent,
             child: Row(
               children: [
                 // =================================================
@@ -1092,17 +1119,11 @@ class _DashboardState extends State<Dashboard> {
                 // =================================================
 
                 Sidebar(
-                  departments:
-                  departments,
-
-                  selected:
-                  selectedDepartment,
-
-                  onSelect:
-                      (value) {
+                  departments: departments,
+                  selected: selectedDepartment,
+                  onSelect: (value) {
                     setState(() {
-                      selectedDepartment =
-                          value;
+                      selectedDepartment = value;
                     });
                   },
                 ),
@@ -1112,57 +1133,18 @@ class _DashboardState extends State<Dashboard> {
                 // =================================================
 
                 Expanded(
-                  child: Container(
-                    padding:
-                    const EdgeInsets.all(
-                      20,
-                    ),
-
-                    decoration:
-                    const BoxDecoration(
-                      gradient:
-                      LinearGradient(
-                        begin:
-                        Alignment
-                            .topLeft,
-
-                        end:
-                        Alignment
-                            .bottomRight,
-
-                        colors: [
-                          Color(
-                            0xFF0B132B,
-                          ),
-
-                          Color(
-                            0xFF1C2541,
-                          ),
-
-                          Color(
-                            0xFF0F172A,
-                          ),
-                        ],
-                      ),
-                    ),
-
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
                     child: Column(
                       children: [
                         buildToolbar(),
 
-                        const SizedBox(
-                          height: 16,
-                        ),
+                        const SizedBox(height: 16),
 
                         Expanded(
-                          child:
-                          isTreeMode
-                              ? buildTree(
-                            data,
-                          )
-                              : _buildGrid(
-                            data,
-                          ),
+                          child: isTreeMode
+                              ? buildTree(data)
+                              : _buildGrid(data),
                         ),
                       ],
                     ),
@@ -1172,12 +1154,9 @@ class _DashboardState extends State<Dashboard> {
             ),
           ),
 
-          // ======================================================
-          // ROCKET LOADING
-          //
-          // Chỉ hiện trong lúc fetch danh sách website lần đầu.
-          // Không chờ check status.
-          // ======================================================
+          // ========================================================
+          // LOADING
+          // ========================================================
 
           if (loading)
             const RocketLoadingScreen(),
