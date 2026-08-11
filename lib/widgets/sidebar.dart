@@ -79,10 +79,12 @@ class _SidebarState extends State<Sidebar> {
             ),
 
             /// 3. DEV TEAM
-            const Positioned.fill(
+            Positioned.fill(
               child: IgnorePointer(
                 child: CustomPaint(
-                  painter: DevTeamBackgroundPainter(),
+                  painter: collapsed
+                      ? const CollapsedDevPainter()
+                      : const DevTeamBackgroundPainter(),
                 ),
               ),
             ),
@@ -260,5 +262,105 @@ class _SidebarState extends State<Sidebar> {
         ),
       ),
     );
+  }
+}
+class CollapsedDevPainter extends CustomPainter {
+  const CollapsedDevPainter();
+
+  static const _cyan = Color(0xFF22D3EE);
+  static const _blue = Color(0xFF3B82F6);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || size.height <= 0) return;
+
+    final center = Offset(
+      size.width / 2,
+      size.height * 0.68,
+    );
+
+    final glow = Paint()
+      ..color = _cyan.withOpacity(.10)
+      ..maskFilter = const MaskFilter.blur(
+        BlurStyle.normal,
+        18,
+      );
+
+    canvas.drawCircle(
+      center,
+      28,
+      glow,
+    );
+
+    final line = Paint()
+      ..color = _cyan.withOpacity(.45)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    final soft = Paint()
+      ..color = _blue.withOpacity(.25)
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+
+    // HEAD
+    canvas.drawCircle(
+      Offset(center.dx, center.dy - 26),
+      8,
+      line,
+    );
+
+    // BODY
+    final body = Path()
+      ..moveTo(center.dx - 12, center.dy - 14)
+      ..quadraticBezierTo(
+        center.dx,
+        center.dy - 20,
+        center.dx + 12,
+        center.dy - 14,
+      )
+      ..lineTo(center.dx + 14, center.dy + 7)
+      ..lineTo(center.dx - 14, center.dy + 7)
+      ..close();
+
+    canvas.drawPath(body, line);
+
+    // LAPTOP
+    final laptop = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: Offset(center.dx, center.dy + 18),
+        width: 32,
+        height: 20,
+      ),
+      const Radius.circular(3),
+    );
+
+    canvas.drawRRect(
+      laptop,
+      line,
+    );
+
+    canvas.drawCircle(
+      Offset(center.dx, center.dy + 18),
+      2,
+      line,
+    );
+
+    // CIRCUIT
+    for (int i = 0; i < 3; i++) {
+      final y = size.height * (.42 + i * .08);
+
+      canvas.drawLine(
+        Offset(5, y),
+        Offset(size.width - 5, y),
+        soft,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(
+      covariant CollapsedDevPainter oldDelegate,
+      ) {
+    return false;
   }
 }
