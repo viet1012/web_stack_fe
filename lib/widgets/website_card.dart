@@ -1,364 +1,265 @@
-import 'dart:html' as html;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:visibility_detector/visibility_detector.dart';
+
 import '../models/website.dart';
-import 'glass_card.dart';
-import 'iframe_view.dart';
+import '../services/screenshot_store.dart';
+import '../services/status_store.dart';
+import '../theme/dash_theme.dart';
+import 'dash_ui.dart';
+import 'site_thumbnail.dart';
+
+/// Chiều cao phần body dưới thumbnail (dùng để tính mainAxisExtent grid).
+const double kCardBodyHeight = 104;
 
 class WebsiteCard extends StatefulWidget {
   final Website website;
-  final bool? isAlive;
+  final ValueListenable<SiteStatus> status;
+  final ValueListenable<ShotMeta> meta;
+  final VoidCallback onPreview;
 
-  const WebsiteCard({super.key, required this.website, required this.isAlive});
+  const WebsiteCard({
+    super.key,
+    required this.website,
+    required this.status,
+    required this.meta,
+    required this.onPreview,
+  });
 
   @override
   State<WebsiteCard> createState() => _WebsiteCardState();
 }
 
-class _WebsiteCardState extends State<WebsiteCard>
-    with SingleTickerProviderStateMixin {
-  bool hover = false;
-  bool copied = false;
-  bool _visible = false;
-  late AnimationController _borderController;
-
-  @override
-  void initState() {
-    super.initState();
-    _borderController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    );
-
-    if (widget.isAlive == true) {
-      _borderController.repeat();
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant WebsiteCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    if (widget.isAlive == true && !_borderController.isAnimating) {
-      _borderController.repeat();
-    } else if (widget.isAlive != true && _borderController.isAnimating) {
-      _borderController.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _borderController.dispose();
-    super.dispose();
-  }
-
-  Color getTypeColor(String type) {
-    switch (type.toLowerCase()) {
-      case 'production':
-        return const Color(0xFF22C55E);
-      case 'dev':
-        return const Color(0xFF8B5CF6);
-      case 'report':
-        return const Color(0xFFF59E0B);
-      case 'test':
-        return const Color(0xFF3B82F6);
-      default:
-        return const Color(0xFF9CA3AF);
-    }
-  }
-
-  void copyUrl(String url) async {
-    await Clipboard.setData(ClipboardData(text: url));
-    setState(() => copied = true);
-
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted) setState(() => copied = false);
-    });
-  }
-
-  // 🔥 Đảm bảo URL có https://
-  String getThumbnail(String url) {
-    return 'http://192.168.122.16:9095/api/screenshot?url=$url';
-  }
+class _WebsiteCardState extends State<WebsiteCard> {
+  bool _hover = false;
+  bool _focusRing = false;
 
   @override
   Widget build(BuildContext context) {
+    final c = context.dash;
     final w = widget.website;
-    final width = MediaQuery.of(context).size.width;
+    final color = tagColor(w.type);
+    final d = Motion.of(context);
+    final lift = _hover && !Motion.reduced(context);
 
-    final isMobile = width < 600;
-    final isTablet = width < 1024;
-
-    final borderRadius = isMobile ? 12.0 : 18.0;
-    final padding = isMobile ? 10.0 : 14.0;
-
-    return VisibilityDetector(
-      key: Key('card-${w.url}'),
-      onVisibilityChanged: (info) {
-        // 🔥 Chỉ load khi card hiện > 10% trên màn hình
-        if (info.visibleFraction > 0.1 && !_visible) {
-          setState(() => _visible = true);
-        }
-      },
-      child: MouseRegion(
-        onEnter: (_) => setState(() => hover = true),
-        onExit: (_) => setState(() => hover = false),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          transform: Matrix4.identity()
-            ..translate(0, hover ? (isMobile ? -2 : -6) : 0)
-            ..scale(hover ? 1.02 : 1),
-          child: GestureDetector(
-            onTap: () => html.window.open(w.url, "_blank"),
-            child: Stack(
-              children: [
-                /// ===== Animated border =====
-                if (widget.isAlive == true)
-                  Positioned.fill(
-                    child: AnimatedBuilder(
-                      animation: _borderController,
-                      builder: (_, __) {
-                        return Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(borderRadius),
-                            gradient: SweepGradient(
-                              transform: GradientRotation(
-                                _borderController.value * 6.28,
-                              ),
-                              colors: const [
-                                Color(0xFF22C55E),
-                                Color(0xFF3B82F6),
-                                Color(0xFF8B5CF6),
-                                Color(0xFFF59E0B),
-                                Color(0xFF22C55E),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+    return ValueListenableBuilder<SiteStatus>(
+      valueListenable: widget.status,
+      builder: (context, status, _) {
+        return FocusableActionDetector(
+          mouseCursor: SystemMouseCursors.click,
+          onShowHoverHighlight: (v) => setState(() => _hover = v),
+          onShowFocusHighlight: (v) => setState(() => _focusRing = v),
+          shortcuts: const {
+            SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+            SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+          },
+          actions: {
+            ActivateIntent: CallbackAction<ActivateIntent>(
+              onInvoke: (_) {
+                widget.onPreview();
+                return null;
+              },
+            ),
+          },
+          child: Semantics(
+            button: true,
+            label: '${w.name}, ${status.state.name}',
+            child: GestureDetector(
+              onTap: widget.onPreview,
+              child: AnimatedContainer(
+                duration: d,
+                curve: Motion.curve,
+                transform: Matrix4.translationValues(0, lift ? -3 : 0, 0),
+                decoration: BoxDecoration(
+                  color: c.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: _focusRing
+                        ? c.accent
+                        : (_hover ? c.accent.withValues(alpha: .35) : c.border),
+                    width: _focusRing ? 2 : 1,
                   ),
-
-                /// ===== Card content =====
-                Padding(
-                  padding: EdgeInsets.all(widget.isAlive == true ? 1.2 : 0),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(borderRadius - 1),
-                    child: Container(
-                      decoration: const BoxDecoration(color: Color(0xFF0B132B)),
-                      child: Stack(
-                        children: [
-                          /// ===== IFRAME (desktop only) =====
-                          if (!isMobile)
-                            AnimatedOpacity(
-                              duration: const Duration(milliseconds: 300),
-                              opacity: hover ? 1 : 0,
-                              child: hover
-                                  ? IframeView(url: w.url)
-                                  : const SizedBox(),
-                            ),
-
-                          /// ===== THUMBNAIL =====
-                          if (!isMobile && _visible && !hover)
-                            Positioned(
-                              right: 8,
-                              bottom: 8,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(10),
-                                child: Container(
-                                  width: 120, // ~ 1/4 card
-                                  height: 80,
-                                  decoration: BoxDecoration(
-                                    color: Colors.black,
-                                    border: Border.all(
-                                      color: Colors.white.withOpacity(0.1),
-                                    ),
-                                  ),
-                                  child: Image.network(
-                                    getThumbnail(w.url),
-                                    fit: BoxFit.cover,
-                                    loadingBuilder: (_, child, progress) {
-                                      if (progress == null) return child;
-                                      return const SizedBox();
-                                    },
-                                    errorBuilder: (_, __, ___) =>
-                                        const SizedBox(),
-                                  ),
-                                ),
-                              ),
-                            ),
-
-                          /// overlay
-                          Positioned.fill(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [
-                                    Colors.black.withOpacity(0.7),
-                                    Colors.black.withOpacity(0.2),
-                                  ],
-                                  begin: Alignment.bottomCenter,
-                                  end: Alignment.topCenter,
-                                ),
-                              ),
-                            ),
-                          ),
-
-                          /// ===== CONTENT =====
-                          Padding(
-                            padding: EdgeInsets.all(padding),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                /// ===== HEADER =====
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        w.name,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: isMobile
-                                              ? 15
-                                              : (isTablet ? 17 : 19),
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    _buildStatus(isMobile),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 6),
-
-                                /// URL
-                                Text(
-                                  w.url,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: const Color(0xFF9CA3AF),
-                                    fontSize: isMobile ? 11 : 13,
-                                  ),
-                                ),
-
-                                const SizedBox(height: 10),
-
-                                /// TYPE
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 3,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: getTypeColor(
-                                      w.type,
-                                    ).withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Text(
-                                    w.type,
-                                    style: TextStyle(
-                                      color: getTypeColor(w.type),
-                                      fontSize: isMobile ? 9 : 11,
-                                    ),
-                                  ),
-                                ),
-
-                                /// ===== FLEXIBLE SPACE =====
-                                const Expanded(child: SizedBox()),
-
-                                /// ===== FOOTER =====
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      w.departmentName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: const Color(0xFF6B7280),
-                                        fontSize: isMobile ? 12 : 14,
-                                      ),
-                                    ),
-
-                                    const SizedBox(height: 6),
-
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: [
-                                        _copyBtn(isMobile),
-                                        _openBtn(isMobile),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                  boxShadow: [
+                    BoxShadow(
+                      color: c.shadow.withValues(
+                        alpha: c.shadow.a * (_hover ? 1 : .35),
                       ),
+                      blurRadius: _hover ? 24 : 8,
+                      offset: Offset(0, _hover ? 10 : 2),
                     ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(13),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: _thumb(context, status, color),
+                      ),
+                      SizedBox(
+                        height: kCardBodyHeight,
+                        child: _body(context, status),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _thumb(BuildContext context, SiteStatus status, Color color) {
+    return ValueListenableBuilder<ShotMeta>(
+      valueListenable: widget.meta,
+      builder: (context, meta, _) => _thumbStack(context, status, meta, color),
+    );
+  }
+
+  Widget _thumbStack(
+    BuildContext context,
+    SiteStatus status,
+    ShotMeta meta,
+    Color color,
+  ) {
+    final c = context.dash;
+    final offline = status.isOffline || meta.state == ShotState.offline;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ColorFiltered(
+          colorFilter: offline
+              ? const ColorFilter.matrix(<double>[
+                  0.2126, 0.7152, 0.0722, 0, 0, //
+                  0.2126, 0.7152, 0.0722, 0, 0, //
+                  0.2126, 0.7152, 0.0722, 0, 0, //
+                  0, 0, 0, 1, 0,
+                ])
+              : const ColorFilter.mode(Colors.transparent, BlendMode.dst),
+          child: SiteThumbnail(
+            website: widget.website,
+            status: status,
+            meta: meta,
+            hover: _hover,
+            onOpenLive: widget.onPreview,
+          ),
+        ),
+
+        // Online: viền trên theo màu tag.
+        Positioned(
+          left: 0,
+          right: 0,
+          top: 0,
+          height: 3,
+          child: AnimatedOpacity(
+            opacity: status.isReachable ? 1 : 0,
+            duration: Motion.of(context),
+            child: ColoredBox(color: color),
+          ),
+        ),
+
+        // Offline: lớp phủ nhạt + icon, không còn khung đen.
+        IgnorePointer(
+          child: AnimatedOpacity(
+            opacity: offline ? 1 : 0,
+            duration: Motion.of(context),
+            child: Container(
+              color: c.surface.withValues(alpha: .62),
+              alignment: Alignment.center,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.cloud_off_rounded, color: c.bad, size: 26),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Unreachable${lastSeenSuffix(status.lastSeen)}',
+                    style: TextStyle(
+                      color: c.text,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-      ),
+
+        Positioned(left: 10, top: 10, child: StatusPill(status: status)),
+      ],
     );
   }
 
-  Widget _buildStatus(bool isMobile) {
-    if (widget.isAlive == null) {
-      return SizedBox(
-        width: 14,
-        height: 14,
-        child: CircularProgressIndicator(strokeWidth: 1.5),
-      );
-    }
+  Widget _body(BuildContext context, SiteStatus status) {
+    final c = context.dash;
+    final w = widget.website;
 
-    return Icon(
-      widget.isAlive! ? Icons.check_circle : Icons.cancel,
-      size: 16,
-      color: widget.isAlive!
-          ? const Color(0xFF22C55E)
-          : const Color(0xFFEF4444),
-    );
-  }
-
-  Widget _copyBtn(bool isMobile) {
-    return GestureDetector(
-      onTap: () => copyUrl(widget.website.url),
-      child: Container(
-        padding: const EdgeInsets.all(6),
-        margin: const EdgeInsets.only(right: 6),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(6),
-          color: copied
-              ? const Color(0xFF22C55E).withOpacity(0.2)
-              : Colors.white.withOpacity(0.05),
-        ),
-        child: Icon(
-          copied ? Icons.check : Icons.copy,
-          size: 18,
-          color: copied ? const Color(0xFF22C55E) : const Color(0xFF6B7280),
-        ),
-      ),
-    );
-  }
-
-  Widget _openBtn(bool isMobile) {
-    return GestureDetector(
-      onTap: () => html.window.open(widget.website.url, "_blank"),
-      child: Icon(
-        Icons.open_in_new,
-        size: 18,
-        color: hover ? const Color(0xFF3B82F6) : const Color(0xFF6B7280),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: Text(
+              w.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: c.text,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                height: 1.25,
+              ),
+            ),
+          ),
+          const SizedBox(height: 3),
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: Tooltip(
+              message: w.url,
+              child: Text(
+                w.url,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: c.muted, fontSize: 12.5, height: 1.3),
+              ),
+            ),
+          ),
+          const Spacer(),
+          Row(
+            children: [
+              Flexible(child: TagChip(w.type)),
+              if (w.departmentName.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: DashChip(
+                    label: w.departmentName,
+                    icon: Icons.apartment_rounded,
+                  ),
+                ),
+              ],
+              const Spacer(),
+              DashIconButton(
+                icon: Icons.content_copy_rounded,
+                tooltip: 'Copy URL',
+                size: 15,
+                onPressed: () => copyUrl(context, w.url),
+              ),
+              DashIconButton(
+                icon: Icons.open_in_new_rounded,
+                tooltip: 'Open in new tab',
+                size: 16,
+                onPressed: () => openInNewTab(w.url),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

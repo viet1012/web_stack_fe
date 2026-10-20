@@ -1,15 +1,287 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 
-import 'DevTeamBackgroundPainter.dart';
+import '../theme/dash_theme.dart';
 import 'animated_logo.dart';
+import 'team_art.dart';
 
-class Sidebar extends StatefulWidget {
-  final List<String> departments;
+const kAllDept = 'ALL';
+
+IconData deptIcon(String name) {
+  switch (name.toLowerCase()) {
+    case 'all':
+      return Icons.apps_rounded;
+    case 'hr':
+      return Icons.groups_rounded;
+    case 'it':
+      return Icons.memory_rounded;
+    case 'kvh':
+      return Icons.apartment_rounded;
+    case 'ma':
+      return Icons.build_rounded;
+    case 'pc':
+      return Icons.event_note_rounded;
+    case 'pro':
+    case 'production':
+      return Icons.precision_manufacturing_rounded;
+    case 'te':
+      return Icons.engineering_rounded;
+    default:
+      return Icons.folder_rounded;
+  }
+}
+
+class Sidebar extends StatelessWidget {
+  /// Có cả "ALL" ở đầu.
+  final List<DeptHealth> departments;
   final String selected;
-  final Function(String) onSelect;
+  final ValueChanged<String> onSelect;
+  final int online;
+  final int total;
 
   const Sidebar({
+    super.key,
+    required this.departments,
+    required this.selected,
+    required this.onSelect,
+    required this.online,
+    required this.total,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+
+    return Container(
+      width: 240,
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(right: BorderSide(color: c.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 22, 20, 18),
+            child: Align(alignment: Alignment.centerLeft, child: AnimatedLogo()),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              'DEPARTMENTS',
+              style: TextStyle(
+                color: c.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: .8,
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              children: [
+                for (final d in departments)
+                  _NavItem(
+                    dept: d,
+                    active: d.name == selected,
+                    onTap: () => onSelect(d.name),
+                  ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+            child: Text(
+              'IT TEAM',
+              style: TextStyle(
+                color: c.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: .8,
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 180,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+              child: TeamArt(
+                depts: departments.where((d) => d.name != kAllDept).toList(),
+                online: online,
+                total: total,
+                selected: selected,
+                onSelect: onSelect,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NavItem extends StatefulWidget {
+  final DeptHealth dept;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _NavItem({
+    required this.dept,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  State<_NavItem> createState() => _NavItemState();
+}
+
+class _NavItemState extends State<_NavItem> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    final active = widget.active;
+    final d = Motion.of(context, Motion.fast);
+
+    final bg = active
+        ? c.accent.withValues(alpha: .16)
+        : (_hover ? c.surface2 : Colors.transparent);
+    final fg = active ? c.text : (_hover ? c.text : c.muted);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Semantics(
+        selected: active,
+        button: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            onHover: (v) => setState(() => _hover = v),
+            borderRadius: BorderRadius.circular(10),
+            focusColor: c.accent.withValues(alpha: .22),
+            child: AnimatedContainer(
+              duration: d,
+              curve: Motion.curve,
+              height: 40,
+              decoration: BoxDecoration(
+                color: bg,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  // Thanh chỉ báo bên trái
+                  AnimatedContainer(
+                    duration: d,
+                    curve: Motion.curve,
+                    width: 3,
+                    height: active ? 20 : 0,
+                    margin: const EdgeInsets.only(right: 9),
+                    decoration: BoxDecoration(
+                      color: c.accent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  Icon(
+                    deptIcon(widget.dept.name),
+                    size: 18,
+                    color: active ? c.accent : fg,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      widget.dept.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: fg,
+                        fontSize: 13.5,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  CountBadge(
+                    count: widget.dept.total,
+                    alert: widget.dept.offline > 0,
+                    active: active,
+                  ),
+                  const SizedBox(width: 10),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class CountBadge extends StatelessWidget {
+  final int count;
+  final bool alert;
+  final bool active;
+
+  const CountBadge({
+    super.key,
+    required this.count,
+    required this.alert,
+    this.active = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          constraints: const BoxConstraints(minWidth: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          decoration: BoxDecoration(
+            color: active ? c.accent : c.surface2,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: active ? c.accent : c.border),
+          ),
+          child: Text(
+            '$count',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: active ? Colors.white : c.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        if (alert)
+          Positioned(
+            right: -2,
+            top: -2,
+            child: Tooltip(
+              message: 'Has offline sites',
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: c.bad,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: c.surface, width: 1.5),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// < 900px: sidebar thành thanh chip ngang.
+class DeptChipBar extends StatelessWidget {
+  final List<DeptHealth> departments;
+  final String selected;
+  final ValueChanged<String> onSelect;
+
+  const DeptChipBar({
     super.key,
     required this.departments,
     required this.selected,
@@ -17,350 +289,54 @@ class Sidebar extends StatefulWidget {
   });
 
   @override
-  State<Sidebar> createState() => _SidebarState();
-}
-
-class _SidebarState extends State<Sidebar> {
-  bool collapsed = false;
-
-  IconData getIcon(String name) {
-    switch (name.toLowerCase()) {
-      case 'it':
-        return Icons.memory;
-      case 'hr':
-        return Icons.groups;
-      case 'production':
-        return Icons.precision_manufacturing;
-      case 'report':
-        return Icons.bar_chart;
-      default:
-        return Icons.dashboard_customize;
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 350),
-      width: collapsed ? 75 : 240,
-      child: ClipRRect(
-        child: Stack(
-          children: [
-            /// 🔥 BACKGROUND GRADIENT
-            /// 1. BACKGROUND
-            Positioned.fill(
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Color(0xFF020617),
-                      Color(0xFF020617),
-                      Color(0xFF071126),
-                      Color(0xFF0F172A),
-                    ],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  ),
+    final c = context.dash;
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        itemCount: departments.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final d = departments[i];
+          final active = d.name == selected;
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => onSelect(d.name),
+              borderRadius: BorderRadius.circular(999),
+              child: AnimatedContainer(
+                duration: Motion.of(context, Motion.fast),
+                curve: Motion.curve,
+                padding: const EdgeInsets.fromLTRB(10, 0, 6, 0),
+                decoration: BoxDecoration(
+                  color: active ? c.accent.withValues(alpha: .16) : c.surface,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: active ? c.accent : c.border),
                 ),
-              ),
-            ),
-
-            /// 2. GLASS
-            Positioned.fill(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(
-                  sigmaX: 12,
-                  sigmaY: 12,
-                ),
-                child: Container(
-                  color: Colors.white.withOpacity(0.015),
-                ),
-              ),
-            ),
-
-            /// 3. DEV TEAM
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(
-                  painter: collapsed
-                      ? const CollapsedDevPainter()
-                      : const DevTeamBackgroundPainter(),
-                ),
-              ),
-            ),
-            Column(
-              children: [
-                const SizedBox(height: 20),
-
-                if (collapsed)
-                  SizedBox(
-                    height: 40,
-                    child: Center(
-                      child: IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 40,
-                          minHeight: 40,
-                        ),
-                        icon: const Icon(
-                          Icons.menu,
-                          color: Color(0xFF94A3B8),
-                          size: 22,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            collapsed = false;
-                          });
-                        },
-                      ),
-                    ),
-                  )
-                else
-                  SizedBox(
-                    height: 40,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                      ),
-                      child: Row(
-                        children: [
-                          const Expanded(
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: AnimatedLogo(),
-                            ),
-                          ),
-
-                          IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 40,
-                              minHeight: 40,
-                            ),
-                            icon: const Icon(
-                              Icons.menu_open,
-                              color: Color(0xFF94A3B8),
-                              size: 22,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                collapsed = true;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                const SizedBox(height: 10),
-
-                Divider(color: Colors.white.withOpacity(0.05), thickness: 1),
-
-                /// 🔥 MENU
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.only(top: 10),
-                    children: widget.departments.map((dep) {
-                      final isActive = dep == widget.selected;
-
-                      return MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 250),
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-
-                            /// 🔥 ACTIVE GRADIENT NEON
-                            gradient: isActive
-                                ? LinearGradient(
-                                    colors: [
-                                      const Color(0xFF3B82F6).withOpacity(0.25),
-                                      const Color(0xFF6366F1).withOpacity(0.15),
-                                    ],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  )
-                                : null,
-
-                            /// 🔥 BORDER GLOW
-                            border: Border.all(
-                              color: isActive
-                                  ? const Color(0xFF3B82F6).withOpacity(0.6)
-                                  : Colors.transparent,
-                            ),
-
-                            /// 🔥 SHADOW GLOW
-                            boxShadow: isActive
-                                ? [
-                                    BoxShadow(
-                                      color: const Color(
-                                        0xFF3B82F6,
-                                      ).withOpacity(0.35),
-                                      blurRadius: 20,
-                                      spreadRadius: 1,
-                                    ),
-                                  ]
-                                : [],
-                          ),
-                          child: ListTile(
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: collapsed ? 10 : 16,
-                              vertical: 4,
-                            ),
-
-                            leading: Icon(
-                              getIcon(dep),
-                              size: 20,
-                              color: isActive
-                                  ? const Color(0xFF60A5FA)
-                                  : const Color(0xFF64748B),
-                            ),
-
-                            title: collapsed
-                                ? null
-                                : Text(
-                                    dep,
-                                    style: TextStyle(
-                                      color: isActive
-                                          ? const Color(0xFFE2E8F0)
-                                          : const Color(0xFF94A3B8),
-                                      fontWeight: isActive
-                                          ? FontWeight.w600
-                                          : FontWeight.w400,
-                                      letterSpacing: 0.3,
-                                    ),
-                                  ),
-
-                            onTap: () => widget.onSelect(dep),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-
-                /// 🔥 FOOTER
-                if (!collapsed)
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Text(
-                      "v1.0 Dashboard",
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(deptIcon(d.name), size: 15, color: active ? c.accent : c.muted),
+                    const SizedBox(width: 6),
+                    Text(
+                      d.name,
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.3),
-                        fontSize: 11,
+                        color: active ? c.text : c.muted,
+                        fontSize: 13,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                       ),
                     ),
-                  ),
-              ],
+                    const SizedBox(width: 6),
+                    CountBadge(count: d.total, alert: d.offline > 0, active: active),
+                  ],
+                ),
+              ),
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
-  }
-}
-class CollapsedDevPainter extends CustomPainter {
-  const CollapsedDevPainter();
-
-  static const _cyan = Color(0xFF22D3EE);
-  static const _blue = Color(0xFF3B82F6);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (size.width <= 0 || size.height <= 0) return;
-
-    final center = Offset(
-      size.width / 2,
-      size.height * 0.68,
-    );
-
-    final glow = Paint()
-      ..color = _cyan.withOpacity(.10)
-      ..maskFilter = const MaskFilter.blur(
-        BlurStyle.normal,
-        18,
-      );
-
-    canvas.drawCircle(
-      center,
-      28,
-      glow,
-    );
-
-    final line = Paint()
-      ..color = _cyan.withOpacity(.45)
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-
-    final soft = Paint()
-      ..color = _blue.withOpacity(.25)
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-
-    // HEAD
-    canvas.drawCircle(
-      Offset(center.dx, center.dy - 26),
-      8,
-      line,
-    );
-
-    // BODY
-    final body = Path()
-      ..moveTo(center.dx - 12, center.dy - 14)
-      ..quadraticBezierTo(
-        center.dx,
-        center.dy - 20,
-        center.dx + 12,
-        center.dy - 14,
-      )
-      ..lineTo(center.dx + 14, center.dy + 7)
-      ..lineTo(center.dx - 14, center.dy + 7)
-      ..close();
-
-    canvas.drawPath(body, line);
-
-    // LAPTOP
-    final laptop = RRect.fromRectAndRadius(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + 18),
-        width: 32,
-        height: 20,
-      ),
-      const Radius.circular(3),
-    );
-
-    canvas.drawRRect(
-      laptop,
-      line,
-    );
-
-    canvas.drawCircle(
-      Offset(center.dx, center.dy + 18),
-      2,
-      line,
-    );
-
-    // CIRCUIT
-    for (int i = 0; i < 3; i++) {
-      final y = size.height * (.42 + i * .08);
-
-      canvas.drawLine(
-        Offset(5, y),
-        Offset(size.width - 5, y),
-        soft,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(
-      covariant CollapsedDevPainter oldDelegate,
-      ) {
-    return false;
   }
 }
