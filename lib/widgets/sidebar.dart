@@ -55,7 +55,7 @@ class Sidebar extends StatelessWidget {
       width: 240,
       decoration: BoxDecoration(
         color: c.surface,
-        border: Border(right: BorderSide(color: c.border)),
+        border: Border(right: BorderSide(color: c.ink, width: 3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -64,17 +64,9 @@ class Sidebar extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(20, 22, 20, 18),
             child: Align(alignment: Alignment.centerLeft, child: AnimatedLogo()),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Text(
-              'DEPARTMENTS',
-              style: TextStyle(
-                color: c.muted,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: .8,
-              ),
-            ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: _SectionLabel('DEPARTMENTS'),
           ),
           Expanded(
             child: ListView(
@@ -89,22 +81,14 @@ class Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-            child: Text(
-              'IT TEAM',
-              style: TextStyle(
-                color: c.muted,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: .8,
-              ),
+          // Cảnh xưởng cao ~300px: màn hình thấp thì nhường chỗ cho danh sách.
+          if (MediaQuery.sizeOf(context).height >= 640) ...[
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: _SectionLabel('IT TEAM'),
             ),
-          ),
-          SizedBox(
-            height: 180,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 18, 16),
               child: TeamArt(
                 depts: departments.where((d) => d.name != kAllDept).toList(),
                 online: online,
@@ -113,8 +97,26 @@ class Sidebar extends StatelessWidget {
                 onSelect: onSelect,
               ),
             ),
-          ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: TextStyle(
+        color: context.dash.accent,
+        fontFamily: kComicFont,
+        fontSize: 15,
+        letterSpacing: 1.4,
       ),
     );
   }
@@ -144,10 +146,8 @@ class _NavItemState extends State<_NavItem> {
     final active = widget.active;
     final d = Motion.of(context, Motion.fast);
 
-    final bg = active
-        ? c.accent.withValues(alpha: .16)
-        : (_hover ? c.surface2 : Colors.transparent);
-    final fg = active ? c.text : (_hover ? c.text : c.muted);
+    final bg = active ? c.hero : (_hover ? c.surface2 : Colors.transparent);
+    final fg = active ? c.ink : (_hover ? c.text : c.muted);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -168,26 +168,21 @@ class _NavItemState extends State<_NavItem> {
               decoration: BoxDecoration(
                 color: bg,
                 borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: active ? c.ink : Colors.transparent,
+                  width: 2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: active ? c.ink : Colors.transparent,
+                    offset: const Offset(3, 3),
+                  ),
+                ],
               ),
               child: Row(
                 children: [
-                  // Thanh chỉ báo bên trái
-                  AnimatedContainer(
-                    duration: d,
-                    curve: Motion.curve,
-                    width: 3,
-                    height: active ? 20 : 0,
-                    margin: const EdgeInsets.only(right: 9),
-                    decoration: BoxDecoration(
-                      color: c.accent,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  Icon(
-                    deptIcon(widget.dept.name),
-                    size: 18,
-                    color: active ? c.accent : fg,
-                  ),
+                  const SizedBox(width: 10),
+                  Icon(deptIcon(widget.dept.name), size: 18, color: fg),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -239,15 +234,15 @@ class CountBadge extends StatelessWidget {
           constraints: const BoxConstraints(minWidth: 24),
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
           decoration: BoxDecoration(
-            color: active ? c.accent : c.surface2,
+            color: active ? c.ink : c.surface2,
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: active ? c.accent : c.border),
+            border: Border.all(color: active ? c.ink : c.border),
           ),
           child: Text(
             '$count',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: active ? Colors.white : c.muted,
+              color: active ? c.hero : c.muted,
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
@@ -311,19 +306,19 @@ class DeptChipBar extends StatelessWidget {
                 curve: Motion.curve,
                 padding: const EdgeInsets.fromLTRB(10, 0, 6, 0),
                 decoration: BoxDecoration(
-                  color: active ? c.accent.withValues(alpha: .16) : c.surface,
+                  color: active ? c.hero : c.surface,
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: active ? c.accent : c.border),
+                  border: Border.all(color: active ? c.ink : c.border, width: 2),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(deptIcon(d.name), size: 15, color: active ? c.accent : c.muted),
+                    Icon(deptIcon(d.name), size: 15, color: active ? c.ink : c.muted),
                     const SizedBox(width: 6),
                     Text(
                       d.name,
                       style: TextStyle(
-                        color: active ? c.text : c.muted,
+                        color: active ? c.ink : c.muted,
                         fontSize: 13,
                         fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                       ),

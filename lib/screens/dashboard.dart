@@ -10,8 +10,10 @@ import '../services/screenshot_store.dart';
 import '../services/status_store.dart';
 import '../services/website_service.dart';
 import '../theme/dash_theme.dart';
+import '../widgets/comic_backdrop.dart';
 import '../widgets/dash_ui.dart';
 import '../widgets/team_art.dart';
+import '../widgets/theme_reveal.dart';
 import '../widgets/preview_dialog.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/site_thumbnail.dart';
@@ -415,7 +417,7 @@ class _DashboardState extends State<Dashboard>
           final online =
               all.where((w) => store.get(w.url.trim()).isReachable).length;
 
-          return Row(
+          final layout = Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (!narrow)
@@ -461,6 +463,13 @@ class _DashboardState extends State<Dashboard>
                   ],
                 ),
               ),
+            ],
+          );
+
+          return Stack(
+            children: [
+              const Positioned.fill(child: ComicBackdrop()),
+              layout,
             ],
           );
         },
@@ -532,7 +541,7 @@ class _DashboardState extends State<Dashboard>
         final width = constraints.maxWidth - pad * 2;
         final count = ((width + gap) / (minW + gap)).floor().clamp(1, 99);
         final itemW = (width - gap * (count - 1)) / count;
-        final extent = itemW * 9 / 16 + kCardBodyHeight + 2;
+        final extent = cardExtent(itemW);
 
         return GridView.builder(
           padding: EdgeInsets.fromLTRB(pad, 8, pad, pad),
@@ -571,7 +580,7 @@ class _DashboardState extends State<Dashboard>
     return ListView.separated(
       padding: EdgeInsets.fromLTRB(pad, 8, pad, pad),
       itemCount: data.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 6),
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, i) {
         final w = data[i];
         return _ListRow(
@@ -614,12 +623,8 @@ class _DashboardState extends State<Dashboard>
         final conflicts = portCount.values.where((n) => n > 1).length;
 
         return Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          decoration: BoxDecoration(
-            color: c.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: c.border),
-          ),
+          margin: const EdgeInsets.only(bottom: 20),
+          decoration: comicPanel(c, radius: 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -656,7 +661,7 @@ class _DashboardState extends State<Dashboard>
                   ],
                 ),
               ),
-              Divider(height: 1, color: c.border),
+              Divider(height: 2.5, thickness: 2.5, color: c.ink),
               Padding(
                 padding: const EdgeInsets.all(6),
                 child: Column(
@@ -750,10 +755,9 @@ class _Header extends StatelessWidget {
     }
 
     return Container(
-      padding: EdgeInsets.fromLTRB(pad, 18, pad, 14),
+      padding: EdgeInsets.fromLTRB(pad, 18, pad, 16),
       decoration: BoxDecoration(
-        color: c.bg,
-        border: Border(bottom: BorderSide(color: c.border)),
+        border: Border(bottom: BorderSide(color: c.ink, width: 3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -764,16 +768,8 @@ class _Header extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Website Dashboard',
-                      style: TextStyle(
-                        color: c.text,
-                        fontSize: narrow ? 18 : 21,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
+                    ComicText('Website Dashboard', size: narrow ? 24 : 30),
+                    const SizedBox(height: 4),
                     Row(
                       children: [
                         StatusDot(
@@ -804,18 +800,9 @@ class _Header extends StatelessWidget {
                   compact: narrow,
                 ),
               ),
-              const SizedBox(width: 6),
-              ValueListenableBuilder<ThemeMode>(
-                valueListenable: ThemeController.mode,
-                builder: (_, mode, _) => DashIconButton(
-                  icon: mode == ThemeMode.dark
-                      ? Icons.light_mode_rounded
-                      : Icons.dark_mode_rounded,
-                  tooltip: mode == ThemeMode.dark ? 'Light theme' : 'Dark theme',
-                  size: 18,
-                  onPressed: ThemeController.toggle,
-                ),
-              ),
+              const SizedBox(width: 12),
+              const ThemeToggle(),
+              const SizedBox(width: 3),
             ],
           ),
           const SizedBox(height: 14),
@@ -870,11 +857,6 @@ class _SearchField extends StatelessWidget {
     required this.onChanged,
   });
 
-  OutlineInputBorder _border(Color color, [double w = 1]) => OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: color, width: w),
-      );
-
   @override
   Widget build(BuildContext context) {
     final c = context.dash;
@@ -886,51 +868,58 @@ class _SearchField extends StatelessWidget {
           focusNode.unfocus();
         },
       },
-      child: ValueListenableBuilder<TextEditingValue>(
-        valueListenable: controller,
-        builder: (context, value, _) => TextField(
-          controller: controller,
-          focusNode: focusNode,
-          onChanged: onChanged,
-          style: TextStyle(color: c.text, fontSize: 13.5),
-          cursorColor: c.accent,
-          decoration: InputDecoration(
-            isDense: true,
-            filled: true,
-            fillColor: c.surface,
-            hintText: 'Search websites',
-            hintStyle: TextStyle(color: c.muted, fontSize: 13.5),
-            prefixIcon: Icon(Icons.search_rounded, size: 18, color: c.muted),
-            prefixIconConstraints: const BoxConstraints(minWidth: 38),
-            suffixIcon: value.text.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: c.border),
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: Text('/', style: TextStyle(color: c.muted, fontSize: 11.5)),
-                    ),
-                  )
-                : IconButton(
-                    tooltip: 'Clear',
-                    icon: Icon(Icons.close_rounded, size: 16, color: c.muted),
-                    onPressed: () {
-                      controller.clear();
-                      onChanged('');
-                    },
-                  ),
-            suffixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            contentPadding: const EdgeInsets.symmetric(vertical: 11),
-            enabledBorder: _border(c.border),
-            focusedBorder: _border(c.accent, 1.5),
+      child: ListenableBuilder(
+        listenable: Listenable.merge([controller, focusNode]),
+        builder: (context, _) => AnimatedContainer(
+          duration: Motion.of(context, Motion.fast),
+          decoration: comicPanel(c, radius: 10, border: 2, offset: 3).copyWith(
+            border: focusNode.hasFocus
+                ? Border.all(color: c.accent, width: 2)
+                : null,
           ),
+          child: _field(c, controller.value),
         ),
       ),
     );
   }
+
+  Widget _field(DashColors c, TextEditingValue value) => TextField(
+        controller: controller,
+        focusNode: focusNode,
+        onChanged: onChanged,
+        style: TextStyle(color: c.text, fontSize: 13.5),
+        cursorColor: c.accent,
+        decoration: InputDecoration(
+          isDense: true,
+          border: InputBorder.none,
+          hintText: 'Search websites',
+          hintStyle: TextStyle(color: c.muted, fontSize: 13.5),
+          prefixIcon: Icon(Icons.search_rounded, size: 18, color: c.muted),
+          prefixIconConstraints: const BoxConstraints(minWidth: 38),
+          suffixIcon: value.text.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: c.border),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text('/', style: TextStyle(color: c.muted, fontSize: 11.5)),
+                  ),
+                )
+              : IconButton(
+                  tooltip: 'Clear',
+                  icon: Icon(Icons.close_rounded, size: 16, color: c.muted),
+                  onPressed: () {
+                    controller.clear();
+                    onChanged('');
+                  },
+                ),
+          suffixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+        ),
+      );
 }
 
 class _Segmented<T> extends StatelessWidget {
@@ -951,11 +940,7 @@ class _Segmented<T> extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: c.border),
-      ),
+      decoration: comicPanel(c, radius: 10, border: 2, offset: 3),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -973,7 +958,7 @@ class _Segmented<T> extends StatelessWidget {
                     curve: Motion.curve,
                     padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
                     decoration: BoxDecoration(
-                      color: e.key == value ? c.accent : Colors.transparent,
+                      color: e.key == value ? c.hero : Colors.transparent,
                       borderRadius: BorderRadius.circular(7),
                     ),
                     child: Row(
@@ -983,14 +968,14 @@ class _Segmented<T> extends StatelessWidget {
                           Icon(
                             e.value.$2,
                             size: 15,
-                            color: e.key == value ? Colors.white : c.muted,
+                            color: e.key == value ? c.ink : c.muted,
                           ),
                           const SizedBox(width: 5),
                         ],
                         Text(
                           e.value.$1,
                           style: TextStyle(
-                            color: e.key == value ? Colors.white : c.muted,
+                            color: e.key == value ? c.ink : c.muted,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
@@ -1030,7 +1015,7 @@ class _SortMenu extends StatelessWidget {
       position: PopupMenuPosition.under,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: c.border),
+        side: BorderSide(color: c.ink, width: 2),
       ),
       itemBuilder: (_) => [
         for (final e in _labels.entries)
@@ -1052,11 +1037,7 @@ class _SortMenu extends StatelessWidget {
       ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        decoration: BoxDecoration(
-          color: c.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: c.border),
-        ),
+        decoration: comicPanel(c, radius: 10, border: 2, offset: 3),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1098,13 +1079,18 @@ class _RefreshButton extends StatelessWidget {
       child: const Icon(Icons.refresh_rounded, size: 17),
     );
     final style = FilledButton.styleFrom(
-      backgroundColor: c.accent,
-      foregroundColor: Colors.white,
-      disabledBackgroundColor: c.accent.withValues(alpha: .55),
-      disabledForegroundColor: Colors.white,
+      backgroundColor: c.hero,
+      foregroundColor: c.ink,
+      disabledBackgroundColor: Color.lerp(c.hero, c.surface, .45),
+      disabledForegroundColor: c.ink.withValues(alpha: .7),
       padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14, vertical: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: c.ink, width: 2),
+      ),
+      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      // Bóng phải ôm đúng khung nút, không ôm vùng chạm 48px.
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
 
     final disabled = running || coolingDown;
@@ -1113,14 +1099,22 @@ class _RefreshButton extends StatelessWidget {
       message: coolingDown && !running
           ? 'Just refreshed — wait a few seconds'
           : 'Re-capture screenshots & re-check all sites',
-      child: compact
-          ? FilledButton(onPressed: disabled ? null : onTap, style: style, child: icon)
-          : FilledButton.icon(
-              onPressed: disabled ? null : onTap,
-              style: style,
-              icon: icon,
-              label: Text(running ? 'Checking…' : 'Refresh'),
-            ),
+      // Bóng in lệch: nhấn được thì nổi, đang chạy thì "ấn xuống".
+      child: AnimatedContainer(
+        duration: Motion.of(context, Motion.fast),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: comicShadows(c, disabled ? 1 : 3),
+        ),
+        child: compact
+            ? FilledButton(onPressed: disabled ? null : onTap, style: style, child: icon)
+            : FilledButton.icon(
+                onPressed: disabled ? null : onTap,
+                style: style,
+                icon: icon,
+                label: Text(running ? 'Checking…' : 'Refresh'),
+              ),
+      ),
     );
   }
 }
@@ -1183,22 +1177,31 @@ class _ListRowState extends State<_ListRow> {
                 horizontal: 12,
                 vertical: widget.dense ? 8 : 10,
               ),
-              decoration: BoxDecoration(
-                color: widget.dense
-                    ? (_hover ? c.surface2 : Colors.transparent)
-                    : (_hover ? c.surface2 : c.surface),
-                borderRadius: BorderRadius.circular(10),
-                border: widget.dense
-                    ? null
-                    : Border(
-                        left: BorderSide(
-                          color: s.isReachable ? tagColor(w.type) : c.border,
-                          width: 3,
-                        ),
-                      ),
-              ),
+              decoration: widget.dense
+                  ? BoxDecoration(
+                      color: _hover ? c.surface2 : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                    )
+                  : comicPanel(
+                      c,
+                      color: _hover ? c.surface2 : c.surface,
+                      radius: 10,
+                      border: 2,
+                      offset: _hover ? 4 : 2,
+                    ),
               child: Row(
                 children: [
+                  // Vạch màu tag (thay viền trái — comicPanel cần viền đều).
+                  if (!widget.dense)
+                    Container(
+                      width: 4,
+                      height: 28,
+                      margin: const EdgeInsets.only(right: 10),
+                      decoration: BoxDecoration(
+                        color: s.isReachable ? tagColor(w.type) : c.border,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
                   if (widget.dense)
                     Container(
                       width: 62,
@@ -1380,14 +1383,10 @@ class _SkeletonGrid extends StatelessWidget {
             crossAxisCount: count,
             crossAxisSpacing: gap,
             mainAxisSpacing: gap,
-            mainAxisExtent: itemW * 9 / 16 + kCardBodyHeight + 2,
+            mainAxisExtent: cardExtent(itemW),
           ),
           itemBuilder: (_, _) => Container(
-            decoration: BoxDecoration(
-              color: c.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: c.border),
-            ),
+            decoration: comicPanel(c, border: 2.5, offset: 4),
             clipBehavior: Clip.antiAlias,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1448,10 +1447,7 @@ class _EmptyState extends StatelessWidget {
           children: [
             Icon(icon, size: 40, color: c.muted),
             const SizedBox(height: 12),
-            Text(
-              title,
-              style: TextStyle(color: c.text, fontSize: 16, fontWeight: FontWeight.w600),
-            ),
+            ComicText(title, size: 24),
             const SizedBox(height: 6),
             Text(
               message,

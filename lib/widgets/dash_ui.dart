@@ -57,6 +57,63 @@ String relativeTime(DateTime? t) {
 }
 
 // ============================================================
+// COMIC TEXT: font Bangers, nét mực đen, bóng in lệch
+// ============================================================
+
+class ComicText extends StatelessWidget {
+  final String text;
+  final double size;
+  final Color? color;
+  final double letterSpacing;
+
+  const ComicText(
+    this.text, {
+    super.key,
+    this.size = 28,
+    this.color,
+    this.letterSpacing = 1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    final base = TextStyle(
+      fontFamily: kComicFont,
+      fontFamilyFallback: const ['Impact', 'Arial Black', 'sans-serif'],
+      fontSize: size,
+      height: 1.1,
+      letterSpacing: letterSpacing,
+    );
+    final shadow = size * .06;
+
+    return Semantics(
+      label: text,
+      excludeSemantics: true,
+      child: Stack(
+        children: [
+          Transform.translate(
+            offset: Offset(shadow, shadow),
+            child: Text(text, maxLines: 1, style: base.copyWith(color: c.ink)),
+          ),
+          Text(
+            text,
+            maxLines: 1,
+            style: base.copyWith(
+              foreground: Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = (size * .09).clamp(2, 6)
+                ..strokeJoin = StrokeJoin.round
+                ..color = c.ink,
+            ),
+          ),
+          Text(text, maxLines: 1, style: base.copyWith(color: color ?? c.hero)),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================
 // STATUS PILL (đặt trên thumbnail)
 // ============================================================
 
@@ -91,9 +148,10 @@ class StatusPill extends StatelessWidget {
           vertical: compact ? 3 : 4,
         ),
         decoration: BoxDecoration(
-          color: const Color(0xCC0A0F1C),
+          color: c.ink.withValues(alpha: .9),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: color.withValues(alpha: .45)),
+          border: Border.all(color: color, width: 1.5),
+          boxShadow: [BoxShadow(color: c.ink, offset: const Offset(2, 2))],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -169,32 +227,35 @@ class _StatusDotState extends State<StatusDot>
   @override
   Widget build(BuildContext context) {
     final s = widget.size;
-    return SizedBox(
-      width: s,
-      height: s,
-      child: AnimatedBuilder(
-        animation: _c,
-        builder: (_, _) => Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.center,
-          children: [
-            if (_c.isAnimating)
-              Transform.scale(
-                scale: 1 + _c.value * 1.6,
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: widget.color.withValues(alpha: .5 * (1 - _c.value)),
+    // Cách ly: chấm nhấp nháy không kéo cả thẻ website vẽ lại mỗi frame.
+    return RepaintBoundary(
+      child: SizedBox(
+        width: s,
+        height: s,
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (_, _) => Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              if (_c.isAnimating)
+                Transform.scale(
+                  scale: 1 + _c.value * 1.6,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: widget.color.withValues(alpha: .5 * (1 - _c.value)),
+                    ),
                   ),
                 ),
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: widget.color,
+                ),
               ),
-            Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: widget.color,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -219,9 +280,9 @@ class DashChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: (color ?? c.muted).withValues(alpha: color == null ? .1 : .14),
+        color: (color ?? c.muted).withValues(alpha: color == null ? .1 : .16),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: fg.withValues(alpha: .25)),
+        border: Border.all(color: fg.withValues(alpha: .6), width: 1.5),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -285,8 +346,8 @@ class DashIconButton extends StatelessWidget {
         onPressed: onPressed,
         icon: Icon(icon, size: size),
         color: c.muted,
-        hoverColor: c.accent.withValues(alpha: .12),
-        highlightColor: c.accent.withValues(alpha: .18),
+        hoverColor: c.hero.withValues(alpha: .22),
+        highlightColor: c.hero.withValues(alpha: .4),
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.all(6),
         constraints: const BoxConstraints(minWidth: 30, minHeight: 30),

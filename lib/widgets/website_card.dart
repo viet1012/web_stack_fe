@@ -12,6 +12,13 @@ import 'site_thumbnail.dart';
 /// Chiều cao phần body dưới thumbnail (dùng để tính mainAxisExtent grid).
 const double kCardBodyHeight = 104;
 
+/// Viền mực quanh thẻ và vạch ngăn thumbnail / body.
+const double _kCardBorder = 2.5;
+
+/// Chiều cao thẻ theo bề rộng ô grid (thumbnail 16:9 nằm trong viền).
+double cardExtent(double width) =>
+    (width - _kCardBorder * 2) * 9 / 16 + kCardBodyHeight + _kCardBorder * 3;
+
 class WebsiteCard extends StatefulWidget {
   final Website website;
   final ValueListenable<SiteStatus> status;
@@ -69,28 +76,23 @@ class _WebsiteCardState extends State<WebsiteCard> {
               child: AnimatedContainer(
                 duration: d,
                 curve: Motion.curve,
-                transform: Matrix4.translationValues(0, lift ? -3 : 0, 0),
-                decoration: BoxDecoration(
-                  color: c.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: _focusRing
-                        ? c.accent
-                        : (_hover ? c.accent.withValues(alpha: .35) : c.border),
-                    width: _focusRing ? 2 : 1,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: c.shadow.withValues(
-                        alpha: c.shadow.a * (_hover ? 1 : .35),
-                      ),
-                      blurRadius: _hover ? 24 : 8,
-                      offset: Offset(0, _hover ? 10 : 2),
-                    ),
-                  ],
+                // Hover: thẻ "bật" lên trái-trên, bóng in lệch dài ra.
+                transform: Matrix4.translationValues(
+                  lift ? -2 : 0,
+                  lift ? -3 : 0,
+                  0,
+                ),
+                decoration: comicPanel(
+                  c,
+                  border: _kCardBorder,
+                  offset: lift ? 8 : 4,
+                ).copyWith(
+                  border: _focusRing
+                      ? Border.all(color: c.accent, width: _kCardBorder)
+                      : null,
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(13),
+                  borderRadius: BorderRadius.circular(12 - _kCardBorder),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -98,6 +100,7 @@ class _WebsiteCardState extends State<WebsiteCard> {
                         aspectRatio: 16 / 9,
                         child: _thumb(context, status, color),
                       ),
+                      Container(height: _kCardBorder, color: c.ink),
                       SizedBox(
                         height: kCardBodyHeight,
                         child: _body(context, status),

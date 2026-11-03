@@ -126,40 +126,44 @@ class _PreviewDialogState extends State<_PreviewDialog> {
         padding: EdgeInsets.all(wide ? 32 : 12),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1280, maxHeight: 860),
-          child: Material(
-            color: c.surface,
-            elevation: 24,
-            shadowColor: Colors.black,
-            shape: RoundedRectangleBorder(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: c.border),
+              boxShadow: comicShadows(c, 9),
             ),
-            clipBehavior: Clip.antiAlias,
-            child: ValueListenableBuilder<SiteStatus>(
-              valueListenable: widget.status,
-              builder: (context, status, _) => Column(
-                children: [
-                  _toolbar(context, status),
-                  Divider(height: 1, color: c.border),
-                  Expanded(
-                    child: wide
-                        ? Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(child: _frame(context, status)),
-                              VerticalDivider(width: 1, color: c.border),
-                              SizedBox(width: 260, child: _info(context, status)),
-                            ],
-                          )
-                        : Column(
-                            children: [
-                              Expanded(child: _frame(context, status)),
-                              Divider(height: 1, color: c.border),
-                              SizedBox(height: 180, child: _info(context, status)),
-                            ],
-                          ),
-                  ),
-                ],
+            child: Material(
+              color: c.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: c.ink, width: 3),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: ValueListenableBuilder<SiteStatus>(
+                valueListenable: widget.status,
+                builder: (context, status, _) => Column(
+                  children: [
+                    _toolbar(context, status),
+                    Divider(height: 3, thickness: 3, color: c.ink),
+                    Expanded(
+                      child: wide
+                          ? Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(child: _frame(context, status)),
+                                VerticalDivider(width: 1, color: c.border),
+                                SizedBox(width: 260, child: _info(context, status)),
+                              ],
+                            )
+                          : Column(
+                              children: [
+                                Expanded(child: _frame(context, status)),
+                                Divider(height: 1, color: c.border),
+                                SizedBox(height: 180, child: _info(context, status)),
+                              ],
+                            ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

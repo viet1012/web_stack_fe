@@ -1,4 +1,9 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+
+import '../theme/dash_theme.dart';
+import 'dash_ui.dart';
 
 class AnimatedLogo extends StatefulWidget {
   const AnimatedLogo({super.key});
@@ -9,18 +14,21 @@ class AnimatedLogo extends StatefulWidget {
 
 class _AnimatedLogoState extends State<AnimatedLogo>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2400),
+  );
 
   bool hover = false;
 
   @override
-  void initState() {
-    super.initState();
-
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (Motion.reduced(context)) {
+      _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    }
   }
 
   @override
@@ -35,47 +43,22 @@ class _AnimatedLogoState extends State<AnimatedLogo>
       onEnter: (_) => setState(() => hover = true),
       onExit: (_) => setState(() => hover = false),
       child: AnimatedScale(
-        scale: hover ? 1.1 : 1,
+        scale: hover ? 1.12 : 1,
         duration: const Duration(milliseconds: 250),
-
+        curve: Curves.easeOutBack,
+        // Lắc nhẹ như nhãn dán truyện tranh (-3° ↔ 1°).
         child: AnimatedBuilder(
           animation: _controller,
-          builder: (context, child) {
-            return ShaderMask(
-              shaderCallback: (bounds) {
-                return LinearGradient(
-                  begin: Alignment(-1 + _controller.value * 2, 0),
-                  end: Alignment(1 + _controller.value * 2, 0),
-                  colors: const [
-                    Color(0xFF22C55E),
-                    Color(0xFF06B6D4),
-                    Color(0xFF6366F1),
-                    Color(0xFFEC4899),
-                    Color(0xFF22C55E),
-                  ],
-                ).createShader(bounds);
-              },
-              child: Text(
-                "IT PRO",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.4,
-
-                  /// 🔥 glow effect
-                  shadows: [
-                    Shadow(
-                      color: hover
-                          ? const Color(0xFF3B82F6)
-                          : const Color(0xFF3B82F6).withOpacity(0.5),
-                      blurRadius: hover ? 20 : 10,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
+          builder: (context, child) => Transform.rotate(
+            angle: (-3 + 4 * Curves.easeInOut.transform(_controller.value)) *
+                pi /
+                180,
+            child: child,
+          ),
+          // Tách layer: mỗi frame chỉ xoay, không vẽ lại chữ.
+          child: const RepaintBoundary(
+            child: ComicText('IT PRO', size: 32, letterSpacing: 2),
+          ),
         ),
       ),
     );
