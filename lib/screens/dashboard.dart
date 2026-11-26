@@ -14,6 +14,7 @@ import '../services/visit_store.dart';
 import '../services/website_service.dart';
 import '../theme/dash_theme.dart';
 import '../widgets/dash_ui.dart';
+import '../widgets/onboarding_tour.dart';
 import '../widgets/preview_dialog.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/site_thumbnail.dart' show Shimmer;
@@ -22,6 +23,20 @@ import '../widgets/theme_curtain.dart';
 import '../widgets/website_card.dart';
 
 enum StatusFilter { all, online, offline }
+
+/// Neo các vùng được giới thiệu trong hướng dẫn người mới (OnboardingTour).
+class _TourKeys {
+  final sidebar = GlobalKey(debugLabel: 'tour.sidebar');
+  final status = GlobalKey(debugLabel: 'tour.status');
+  final search = GlobalKey(debugLabel: 'tour.search');
+  final filter = GlobalKey(debugLabel: 'tour.filter');
+  final preview = GlobalKey(debugLabel: 'tour.preview');
+  final theme = GlobalKey(debugLabel: 'tour.theme');
+  final refresh = GlobalKey(debugLabel: 'tour.refresh');
+  final help = GlobalKey(debugLabel: 'tour.help');
+  final frequent = GlobalKey(debugLabel: 'tour.frequent');
+  final card = GlobalKey(debugLabel: 'tour.card');
+}
 
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
@@ -171,6 +186,186 @@ class _DashboardState extends State<Dashboard>
     } catch (_) {}
   }
 
+  // ============================================================
+  // ONBOARDING TOUR
+  // ============================================================
+
+  final _tk = _TourKeys();
+  bool _touring = false;
+
+  Future<void> _startTour() async {
+    if (!mounted || _touring) return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    final narrow = MediaQuery.sizeOf(context).width < 900;
+    _touring = true;
+    try {
+      await OnboardingTour.show(context, [
+        const TourStep(
+          icon: LucideIcons.sparkles,
+          title: 'Chào mừng đến IT PRO',
+          body:
+              'Website Dashboard tập hợp toàn bộ website nội bộ của các phòng '
+              'ban và tự kiểm tra site nào đang online / offline.\n'
+              'Hướng dẫn nhanh này giới thiệu các nút chức năng (khoảng 1 phút). '
+              'Dùng phím ← → để chuyển bước, Esc để thoát.',
+        ),
+        TourStep(
+          target: _tk.sidebar,
+          icon: LucideIcons.layoutGrid,
+          title: 'Phòng ban',
+          body:
+              'Bấm vào tên 1 phòng ban để chỉ xem website của phòng đó. '
+              'Bấm "All sites" để xem lại tất cả.',
+          example: _DeptExample(
+            mode: narrow
+                ? _DeptExampleMode.chip
+                : (_sidebarCollapsed
+                      ? _DeptExampleMode.rail
+                      : _DeptExampleMode.row),
+          ),
+          items: [
+            if (narrow || !_sidebarCollapsed) ...[
+              (
+                LucideIcons.wifiOff,
+                'Nhãn ĐỎ (biểu tượng wifi gạch chéo + số): số website của '
+                    'phòng đang KHÔNG truy cập được. Ví dụ trên: phòng KVH có '
+                    '2 site đang lỗi.',
+              ),
+              (
+                LucideIcons.hash,
+                'Số XÁM: tổng số website của phòng (ví dụ trên: 5 site).',
+              ),
+            ] else
+              (
+                LucideIcons.wifiOff,
+                'Số ĐỎ ở góc ô: số website của phòng đang KHÔNG truy cập được. '
+                    'Di chuột lên ô để xem tên phòng và số site.',
+              ),
+            (
+              LucideIcons.circleCheck,
+              'Không có nhãn đỏ = mọi site của phòng đều hoạt động bình thường.',
+            ),
+            if (!narrow)
+              (
+                _sidebarCollapsed
+                    ? LucideIcons.panelLeftOpen
+                    : LucideIcons.panelLeftClose,
+                'Nút thu gọn / mở rộng thanh bên — phím tắt '
+                    '${Sidebar.shortcutLabel}',
+              ),
+          ],
+        ),
+        TourStep(
+          target: _tk.status,
+          icon: LucideIcons.activity,
+          title: 'Tình trạng chung',
+          body:
+              'Cho biết nhanh hệ thống đang ổn hay không. Di chuột lên dòng '
+              'này để xem giải thích chi tiết.',
+          items: const [
+            (
+              LucideIcons.circleCheck,
+              '21/24 online: 21 trên tổng 24 site đang truy cập được',
+            ),
+            (
+              LucideIcons.gauge,
+              'Phản hồi ~180 ms: thời gian một site thường mất để trả lời. '
+                  'Càng nhỏ càng nhanh (1000 ms = 1 giây)',
+            ),
+            (
+              LucideIcons.clock,
+              'Cập nhật lúc …: lần kiểm tra gần nhất. Trang tự kiểm tra lại '
+                  'mỗi 60 giây',
+            ),
+          ],
+        ),
+        TourStep(
+          target: _tk.search,
+          icon: LucideIcons.search,
+          title: 'Tìm kiếm',
+          body: 'Tìm theo tên, URL hoặc tên phòng ban.',
+          items: const [
+            (
+              LucideIcons.keyboard,
+              'Nhấn / ở bất kỳ đâu để nhảy vào ô tìm kiếm',
+            ),
+            (LucideIcons.x, 'Esc để xoá nội dung tìm kiếm'),
+          ],
+        ),
+        TourStep(
+          target: _tk.filter,
+          icon: LucideIcons.listFilter,
+          title: 'Lọc theo trạng thái',
+          body:
+              'All / Online / Offline. Con số bên cạnh là số site khớp phòng '
+              'ban và từ khoá đang chọn.',
+        ),
+        TourStep(
+          target: _tk.preview,
+          icon: LucideIcons.image,
+          title: 'Ẩn / hiện ảnh xem trước',
+          body:
+              'Bật/tắt ảnh chụp màn hình trên tất cả thẻ website. Tắt đi để '
+              'danh sách gọn hơn. Lựa chọn được ghi nhớ.',
+        ),
+        TourStep(
+          target: _tk.theme,
+          icon: LucideIcons.sunMoon,
+          title: 'Giao diện Sáng / Tối',
+          body: 'Chuyển giữa Light và Dark. Lựa chọn được ghi nhớ cho lần sau.',
+        ),
+        TourStep(
+          target: _tk.refresh,
+          icon: LucideIcons.refreshCw,
+          title: 'Làm mới',
+          body:
+              'Chụp lại ảnh và kiểm tra lại toàn bộ site ngay. Sau khi bấm, nút '
+              'tạm khoá 10 giây để tránh bấm liên tục.',
+        ),
+        TourStep(
+          target: _tk.frequent,
+          icon: LucideIcons.star,
+          title: 'Frequently visited',
+          body:
+              'Site đã gắn sao (luôn hiện) + site bạn mở nhiều nhất trong 30 '
+              'ngày gần đây.',
+          items: const [
+            (LucideIcons.grab, 'Kéo thả thẻ để đổi thứ tự'),
+            (LucideIcons.x, 'Gỡ site khỏi khung này'),
+          ],
+        ),
+        TourStep(
+          target: _tk.card,
+          icon: LucideIcons.panelsTopLeft,
+          title: 'Thẻ website',
+          body:
+              'Chấm màu cạnh tên cho biết trạng thái: xanh = online, cam = chậm '
+              '/ cần đăng nhập / đang kiểm tra, đỏ = offline, xám = chưa kiểm tra. '
+              'Di chuột lên chấm để xem chi tiết.',
+          items: const [
+            (LucideIcons.star, 'Gắn sao để ghim site lên Frequently visited'),
+            (LucideIcons.externalLink, 'Mở site trong tab mới'),
+            (LucideIcons.copy, 'Sao chép địa chỉ URL'),
+            (
+              LucideIcons.mousePointerClick,
+              'Bấm vào ảnh xem trước cũng mở site. Ảnh trống → nút "Open live" '
+                  'để xem trực tiếp',
+            ),
+          ],
+        ),
+        TourStep(
+          target: _tk.help,
+          icon: LucideIcons.circleHelp,
+          title: 'Xem lại hướng dẫn',
+          body:
+              'Bấm nút này (hoặc phím ?) bất cứ lúc nào để xem lại hướng dẫn.',
+        ),
+      ]);
+    } finally {
+      _touring = false;
+    }
+  }
+
   bool loading = true;
   String? loadError;
 
@@ -277,6 +472,11 @@ class _DashboardState extends State<Dashboard>
       Future.delayed(const Duration(milliseconds: 1500), () {
         if (mounted) _stagger = false;
       });
+
+      // Lần đầu vào trang → tự mở hướng dẫn (sau khi card đã hiện xong).
+      if (!OnboardingTour.seen) {
+        Future.delayed(const Duration(milliseconds: 1600), _startTour);
+      }
 
       final urls = data.map((e) => e.url.trim()).toList();
       store.refreshAll(data);
@@ -393,6 +593,14 @@ class _DashboardState extends State<Dashboard>
       if (!(ModalRoute.of(context)?.isCurrent ?? true)) return false;
       if (MediaQuery.sizeOf(context).width < 900) return false; // màn hẹp
       _toggleSidebar();
+      return true;
+    }
+
+    // "?" (Shift + /): mở hướng dẫn — trừ khi đang gõ trong ô tìm kiếm.
+    if (event.character == '?') {
+      if (_searchFocus.hasFocus) return false;
+      if (!(ModalRoute.of(context)?.isCurrent ?? true)) return false;
+      _startTour();
       return true;
     }
 
@@ -563,6 +771,7 @@ class _DashboardState extends State<Dashboard>
     final inlineTools = width - sideW >= 948;
 
     Widget sidebar({required bool compact}) => ListenableBuilder(
+      key: _tk.sidebar,
       listenable: store,
       builder: (context, _) => Sidebar(
         departments: _deptHealth(),
@@ -587,6 +796,8 @@ class _DashboardState extends State<Dashboard>
             child: ListenableBuilder(
               listenable: store,
               builder: (context, _) => _Header(
+                tourKeys: _tk,
+                onHelp: _startTour,
                 tools: inlineTools
                     ? Row(
                         mainAxisSize: MainAxisSize.min,
@@ -706,6 +917,7 @@ class _DashboardState extends State<Dashboard>
       padding: EdgeInsets.fromLTRB(pad, 14, pad, 0),
       // Cùng kiểu khung phòng ban: viền đen (Light) / trắng (Dark), bo 16.
       child: Container(
+        key: _tk.frequent,
         padding: const EdgeInsets.fromLTRB(11, 9, 11, 11),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
@@ -838,6 +1050,7 @@ class _DashboardState extends State<Dashboard>
 
     return [
       SizedBox(
+        key: _tk.search,
         width: searchWidth,
         child: _SearchField(
           controller: _searchCtrl,
@@ -846,6 +1059,7 @@ class _DashboardState extends State<Dashboard>
         ),
       ),
       _Segmented(
+        key: _tk.filter,
         value: statusFilter,
         onChanged: (v) => setState(() => statusFilter = v),
         items: [
@@ -970,8 +1184,9 @@ class _DashboardState extends State<Dashboard>
     // Thứ tự card toàn cục (cho stagger).
     final order = {for (var i = 0; i < data.length; i++) data[i].id: i};
 
+    // Card đầu tiên làm mẫu cho bước "Thẻ website" của hướng dẫn.
     Widget card(Website w) => _Entrance(
-      key: ValueKey('card-${w.id}'),
+      key: w.id == data.first.id ? _tk.card : ValueKey('card-${w.id}'),
       index: order[w.id] ?? 0,
       enabled: _stagger,
       // Hover/animation trong 1 card không repaint cả grid.
@@ -1212,7 +1427,12 @@ class _Header extends StatelessWidget {
   final bool showPreview;
   final VoidCallback onTogglePreview;
 
+  final _TourKeys tourKeys;
+  final VoidCallback onHelp;
+
   const _Header({
+    required this.tourKeys,
+    required this.onHelp,
     this.tools,
     required this.showPreview,
     required this.onTogglePreview,
@@ -1232,12 +1452,22 @@ class _Header extends StatelessWidget {
     final c = context.dash;
     final t = context.tone;
     final updated = running
-        ? 'checking…'
-        : (lastRun != null ? 'updated ${hms(lastRun!)}' : 'not checked yet');
+        ? 'đang kiểm tra…'
+        : (lastRun != null ? 'cập nhật lúc ${hms(lastRun!)}' : 'chưa kiểm tra');
+    // medianMs = độ trễ trung vị của các site online, hiển thị dạng dễ hiểu
+    // "phản hồi ~X ms"; giải thích chi tiết ở tooltip.
     final rest = [
-      if (medianMs != null) 'median $medianMs ms',
+      if (medianMs != null) 'phản hồi ~$medianMs ms',
       updated,
     ].join(' · ');
+    final tip = [
+      '$online/$total site đang hoạt động'
+          '${offline > 0 ? ', $offline site không truy cập được' : ''}.',
+      if (medianMs != null)
+        'Phản hồi ~$medianMs ms: thời gian một site thường mất để trả lời '
+            '(một nửa số site nhanh hơn, một nửa chậm hơn). Càng nhỏ càng nhanh.',
+      'Tự kiểm tra lại mỗi 60 giây.',
+    ].join('\n');
 
     return Row(
       children: [
@@ -1258,6 +1488,7 @@ class _Header extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Row(
+                key: tourKeys.status,
                 children: [
                   Container(
                     width: 8,
@@ -1269,25 +1500,28 @@ class _Header extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Flexible(
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: '$online/$total online',
-                            style: TextStyle(
-                              color: c.text,
-                              fontWeight: FontWeight.w500,
+                    child: Tooltip(
+                      message: tip,
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '$online/$total online',
+                              style: TextStyle(
+                                color: c.text,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                          ),
-                          TextSpan(text: ' · $rest'),
-                        ],
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: c.muted,
-                        fontSize: 13,
-                        fontFeatures: const [FontFeature.tabularFigures()],
+                            TextSpan(text: ' · $rest'),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: c.muted,
+                          fontSize: 13,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
                       ),
                     ),
                   ),
@@ -1299,6 +1533,15 @@ class _Header extends StatelessWidget {
         if (tools != null) ...[const SizedBox(width: 16), tools!],
         const SizedBox(width: 10),
         _HeaderIconButton(
+          key: tourKeys.help,
+          icon: LucideIcons.circleHelp,
+          tooltip: 'Hướng dẫn sử dụng (?)',
+          active: false,
+          onTap: onHelp,
+        ),
+        const SizedBox(width: 8),
+        _HeaderIconButton(
+          key: tourKeys.preview,
           icon: showPreview ? LucideIcons.image : LucideIcons.imageOff,
           tooltip: showPreview
               ? 'Ẩn preview tất cả site'
@@ -1307,9 +1550,10 @@ class _Header extends StatelessWidget {
           onTap: onTogglePreview,
         ),
         const SizedBox(width: 8),
-        const _ThemeToggle(),
+        _ThemeToggle(key: tourKeys.theme),
         const SizedBox(width: 8),
         ValueListenableBuilder<bool>(
+          key: tourKeys.refresh,
           valueListenable: coolingDown,
           builder: (_, cooling, _) => _RefreshButton(
             spin: spin,
@@ -1332,6 +1576,7 @@ class _HeaderIconButton extends StatelessWidget {
   final VoidCallback onTap;
 
   const _HeaderIconButton({
+    super.key,
     required this.icon,
     required this.tooltip,
     required this.active,
@@ -1369,7 +1614,7 @@ class _HeaderIconButton extends StatelessWidget {
 
 /// Nút đổi Light/Dark: cùng kích thước & viền với Refresh.
 class _ThemeToggle extends StatelessWidget {
-  const _ThemeToggle();
+  const _ThemeToggle({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -1690,6 +1935,7 @@ class _Segmented extends StatelessWidget {
   final List<(StatusFilter, String, int)> items;
 
   const _Segmented({
+    super.key,
     required this.value,
     required this.onChanged,
     required this.items,
@@ -1816,6 +2062,245 @@ class _EntranceState extends State<_Entrance> {
         child: widget.child,
       ),
     );
+  }
+}
+
+// ============================================================
+// DEPT EXAMPLE — hình minh hoạ phòng ban trong hướng dẫn
+// ============================================================
+
+enum _DeptExampleMode { row, rail, chip }
+
+/// Phòng "KVH" mẫu: 5 site, 2 site offline — vẽ giống hệt sidebar thật
+/// theo kiểu đang hiển thị (hàng mở rộng / ô thu gọn / chip màn hẹp).
+class _DeptExample extends StatelessWidget {
+  final _DeptExampleMode mode;
+  const _DeptExample({required this.mode});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    final t = context.tone;
+
+    Widget pill(String text, Color fg, Color bg, {IconData? icon}) => Container(
+      constraints: const BoxConstraints(minWidth: 24),
+      height: 20,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 10, color: fg),
+            const SizedBox(width: 2),
+          ],
+          Text(
+            text,
+            style: TextStyle(
+              color: fg,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    Widget arrow(String label, Color color) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(LucideIcons.arrowUp, size: 12, color: color),
+        const SizedBox(width: 2),
+        Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+
+    switch (mode) {
+      case _DeptExampleMode.row:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              height: 40,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                color: c.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: c.border),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: c.surface2,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Text(
+                      'KVH',
+                      style: displayText(
+                        size: 10,
+                        weight: FontWeight.w700,
+                        color: c.textSoft,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'KVH',
+                      style: TextStyle(
+                        color: c.textSoft,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  pill('2', t.offFg, t.offBg, icon: LucideIcons.wifiOff),
+                  const SizedBox(width: 4),
+                  pill('5', c.muted, c.surface2),
+                  const SizedBox(width: 6),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Spacer(),
+                arrow('2 site lỗi', t.offFg),
+                const SizedBox(width: 10),
+                arrow('tổng 5 site', c.muted),
+                const SizedBox(width: 2),
+              ],
+            ),
+          ],
+        );
+
+      case _DeptExampleMode.rail:
+        return Row(
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: c.surface2,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'KVH',
+                    style: displayText(
+                      size: 11.5,
+                      weight: FontWeight.w700,
+                      color: c.textSoft,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  right: -4,
+                  top: -4,
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 15),
+                    height: 15,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: t.offFg,
+                      borderRadius: BorderRadius.circular(99),
+                      border: Border.all(color: c.bg, width: 1.5),
+                    ),
+                    child: const Text(
+                      '2',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.w700,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 14),
+            Icon(LucideIcons.arrowLeft, size: 12, color: t.offFg),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                'Phòng KVH có 2 site lỗi',
+                style: TextStyle(
+                  color: t.offFg,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+
+      case _DeptExampleMode.chip:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              height: 32,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: c.surface,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: c.border),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'KVH',
+                    style: TextStyle(
+                      color: c.text,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text('5', style: TextStyle(color: c.muted, fontSize: 12)),
+                  const SizedBox(width: 6),
+                  Icon(LucideIcons.wifiOff, size: 11, color: t.offFg),
+                  const SizedBox(width: 2),
+                  Text(
+                    '2',
+                    style: TextStyle(
+                      color: t.offFg,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Số xám 5 = tổng site · số đỏ 2 = site đang lỗi',
+              style: TextStyle(color: c.muted, fontSize: 11.5),
+            ),
+          ],
+        );
+    }
   }
 }
 
