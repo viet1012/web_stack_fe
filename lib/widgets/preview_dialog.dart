@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../models/website.dart';
 import '../services/status_store.dart';
@@ -189,7 +190,7 @@ class _PreviewDialogState extends State<_PreviewDialog> {
             ),
           ),
           DashIconButton(
-            icon: Icons.refresh_rounded,
+            icon: LucideIcons.refreshCw,
             tooltip: 'Reload live preview',
             size: 18,
             onPressed: _refresh,
@@ -197,27 +198,27 @@ class _PreviewDialogState extends State<_PreviewDialog> {
           if (widget.onRecapture != null)
             DashIconButton(
               icon: _recapturing
-                  ? Icons.hourglass_top_rounded
-                  : Icons.photo_camera_outlined,
+                  ? LucideIcons.hourglass
+                  : LucideIcons.camera,
               tooltip: 'Re-capture thumbnail',
               size: 18,
               onPressed: _recapture,
             ),
           DashIconButton(
-            icon: Icons.open_in_new_rounded,
+            icon: LucideIcons.externalLink,
             tooltip: 'Open in new tab',
             size: 18,
             onPressed: () => openInNewTab(_url),
           ),
           DashIconButton(
-            icon: Icons.content_copy_rounded,
+            icon: LucideIcons.copy,
             tooltip: 'Copy URL',
             size: 17,
             onPressed: () => copyUrl(context, _url),
           ),
           const SizedBox(width: 4),
           DashIconButton(
-            icon: Icons.close_rounded,
+            icon: LucideIcons.x,
             tooltip: 'Close (Esc)',
             size: 18,
             onPressed: () => Navigator.of(context).maybePop(),
@@ -257,7 +258,7 @@ class _PreviewDialogState extends State<_PreviewDialog> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.block_rounded, color: c.muted, size: 36),
+                  Icon(LucideIcons.ban, color: c.muted, size: 36),
                   const SizedBox(height: 12),
                   Text(
                     'Preview unavailable',
@@ -279,7 +280,7 @@ class _PreviewDialogState extends State<_PreviewDialog> {
                   const SizedBox(height: 16),
                   FilledButton.icon(
                     onPressed: () => openInNewTab(_url),
-                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                    icon: const Icon(LucideIcons.externalLink, size: 16),
                     label: const Text('Open in new tab'),
                   ),
                 ],
@@ -323,7 +324,7 @@ class _PreviewDialogState extends State<_PreviewDialog> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(
             children: [
-              Icon(Icons.info_outline_rounded, size: 14, color: c.muted),
+              Icon(LucideIcons.info, size: 14, color: c.muted),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -374,7 +375,6 @@ class _PreviewDialogState extends State<_PreviewDialog> {
         row('Host', SelectableText(hp.host, style: TextStyle(color: c.text, fontSize: 13))),
         row('Port', val(hp.port?.toString() ?? 'default')),
         row('Dept', val(w.departmentName.isEmpty ? '—' : w.departmentName)),
-        row('Tag', Align(alignment: Alignment.centerLeft, child: TagChip(w.type))),
         row(
           'Latency',
           val(status.latencyMs == null ? '—' : '${status.latencyMs} ms'),

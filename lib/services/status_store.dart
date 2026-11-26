@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/website.dart';
 import 'website_service.dart';
 
 /// unknown  = chưa check / request lỗi / BE không trả url này (xám "Not checked")
@@ -19,11 +19,15 @@ class SiteStatus {
   /// Lần cuối BE trả online == true. null → không hiện "last seen".
   final DateTime? lastSeen;
 
+  /// BE báo chứng chỉ tự ký / không hợp lệ. Không ảnh hưởng online/offline.
+  final bool certWarning;
+
   const SiteStatus({
     required this.state,
     this.latencyMs,
     this.lastCheck,
     this.lastSeen,
+    this.certWarning = false,
   });
 
   bool get isOnline => state == SiteState.online;
@@ -41,7 +45,6 @@ class SiteStatus {
 /// [runVersion] chỉ tăng khi 1 lượt check kết thúc (dùng để re-sort/filter).
 class StatusStore extends ChangeNotifier {
   static const _lastSeenKey = 'dash.lastSeen.v2';
-  static const concurrency = 6;
 
   final Map<String, ValueNotifier<SiteStatus>> _items = {};
   final Map<String, DateTime> _lastSeen = {};
@@ -110,32 +113,34 @@ class StatusStore extends ChangeNotifier {
       latencyMs: online ? r.latencyMs : null,
       lastCheck: now,
       lastSeen: _lastSeen[key] ?? old.lastSeen,
+      certWarning: online && r.certWarning,
     );
   }
 
-  /// POST /check-status mỗi URL (body = [url]), song song tối đa [concurrency].
+  /// GET /api/websites/status (1 request, BE check), map kết quả theo id
+  /// rồi gán vào key URL của từng site.
   /// [markChecking]: refresh tay → hiện "Checking…" cho tất cả;
   /// auto-refresh → giữ trạng thái cũ, chỉ cập nhật khi có kết quả.
-  Future<void> probeAll(
-    Iterable<String> urls, {
+  Future<void> refreshAll(
+    Iterable<Website> sites, {
     bool markChecking = true,
   }) async {
-    final originals = <String, String>{};
-    for (final u in urls) {
-      final t = u.trim();
-      if (t.isNotEmpty) originals.putIfAbsent(normUrl(t), () => t);
-    }
-    final keys = originals.keys.toList();
+    // id → key URL (normUrl). Nhiều site trùng URL thì dùng chung 1 key.
+    final keyOf = <int, String>{
+      for (final w in sites)
+        if (w.url.trim().isNotEmpty) w.id: normUrl(w.url),
+    };
     final generation = ++_generation;
 
     if (markChecking) {
-      for (final key in keys) {
+      for (final key in keyOf.values.toSet()) {
         final old = of(key).value;
         of(key).value = SiteStatus(
           state: SiteState.checking,
           latencyMs: old.latencyMs,
           lastCheck: old.lastCheck,
           lastSeen: old.lastSeen,
+          certWarning: old.certWarning,
         );
       }
     }
@@ -143,29 +148,16 @@ class StatusStore extends ChangeNotifier {
     running = true;
     notifyListeners();
 
-    var next = 0;
-
-    Future<void> worker() async {
-      while (next < keys.length) {
-        final key = keys[next++];
-        StatusResult? r;
-        try {
-          final res = await WebsiteService.checkStatusBatch([originals[key]!]);
-          r = res[key];
-        } catch (e) {
-          debugPrint('[check-status] $key failed: $e');
-        }
-        if (generation != _generation) return;
-        _apply(key, r, DateTime.now());
-        notifyListeners();
-      }
+    Map<int, StatusResult>? res;
+    try {
+      res = await WebsiteService.fetchStatus();
+    } catch (e) {
+      debugPrint('[status] failed: $e');
     }
-
-    await Future.wait(
-      List.generate(math.min(concurrency, keys.length), (_) => worker()),
-    );
-
     if (generation != _generation) return;
+
+    final now = DateTime.now();
+    keyOf.forEach((id, key) => _apply(key, res?[id], now));
 
     running = false;
     lastRun = DateTime.now();

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
 import '../models/website.dart';
@@ -148,8 +149,10 @@ class _SiteThumbnailState extends State<SiteThumbnail> {
         height: double.infinity,
         // Giữ ảnh cũ trong lúc tải ảnh mới (cache-bust).
         gaplessPlayback: true,
-        // CanvasKit cần CORS cho ảnh; nếu BE không có → fallback <img>.
-        webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
+        // Preview hiện trên MỌI card → không dùng <img> platform view
+        // (16 cái sẽ rất nặng). BE phải bật CORS cho /api/screenshot;
+        // thiếu CORS → errorBuilder → placeholder.
+        webHtmlElementStrategy: WebHtmlElementStrategy.never,
         frameBuilder: (_, child, frame, sync) {
           if (frame != null || sync) {
             WidgetsBinding.instance.addPostFrameCallback((_) => _loaded(src));
@@ -202,7 +205,7 @@ class _SiteThumbnailState extends State<SiteThumbnail> {
               Center(
                 child: FilledButton.tonalIcon(
                   onPressed: widget.onOpenLive,
-                  icon: const Icon(Icons.play_circle_outline_rounded, size: 16),
+                  icon: const Icon(LucideIcons.circlePlay, size: 16),
                   label: const Text('Open live'),
                   style: FilledButton.styleFrom(
                     visualDensity: VisualDensity.compact,
@@ -457,11 +460,11 @@ class _PlaceholderPainter extends CustomPainter {
 
     // Icon mờ ở giữa để nhận diện loại.
     final icon = switch (kind) {
-      ThumbKind.dashboard => Icons.space_dashboard_rounded,
-      ThumbKind.table => Icons.table_chart_rounded,
-      ThumbKind.camera => Icons.videocam_rounded,
-      ThumbKind.printer => Icons.print_rounded,
-      ThumbKind.map => Icons.map_rounded,
+      ThumbKind.dashboard => LucideIcons.layoutDashboard,
+      ThumbKind.table => LucideIcons.table,
+      ThumbKind.camera => LucideIcons.video,
+      ThumbKind.printer => LucideIcons.printer,
+      ThumbKind.map => LucideIcons.map,
     };
     final tp = TextPainter(
       text: TextSpan(

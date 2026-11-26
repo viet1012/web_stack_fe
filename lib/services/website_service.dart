@@ -21,10 +21,14 @@ class StatusResult {
   final bool authRequired;
   final int? latencyMs;
 
+  /// Chứng chỉ tự ký / không hợp lệ — site vẫn online.
+  final bool certWarning;
+
   const StatusResult({
     required this.online,
     required this.authRequired,
     required this.latencyMs,
+    this.certWarning = false,
   });
 }
 
@@ -94,50 +98,52 @@ class WebsiteService {
   // ENDPOINTS (đổi tại đây nếu BE khác path)
   // ============================================================
 
-  static const _checkStatusPath = '/api/websites/check-status';
+  static const _statusPath = '/api/websites/status';
   static const _screenshotPath = '/api/screenshot';
   static const _screenshotMetaPath = '/api/screenshot/meta';
   static const _screenshotRefreshPath = '/api/screenshot/refresh';
 
-  // STATUS: BE nhận danh sách url trong BODY (POST), bỏ qua ?url=.
-  // Không có body → BE check TẤT CẢ site (chậm). Response là MAP:
-  //   { "<url>": { online, authRequired, statusCode, latencyMs, error } }
-  // Trả về map theo key đã normalize (normUrl). Lỗi request → throw,
-  // để caller gán "unknown" chứ không phải offline.
+  // STATUS: 1 request lấy trạng thái tất cả site do BE check.
+  // Chấp nhận 2 dạng response:
+  //   [ { id, online, authRequired, latencyMs, certWarning }, ... ]
+  //   { "<id>": { online, authRequired, latencyMs, certWarning }, ... }
+  // Trả về map theo id. Lỗi request → throw, để caller gán "unknown"
+  // chứ không phải offline.
   static bool _loggedStatusRaw = false;
 
-  static Future<Map<String, StatusResult>> checkStatusBatch(
-    List<String> urls, {
-    Duration timeout = const Duration(seconds: 6),
+  static Future<Map<int, StatusResult>> fetchStatus({
+    Duration timeout = const Duration(seconds: 20),
   }) async {
-    final res = await dio
-        .post(_checkStatusPath, data: urls)
-        .timeout(timeout);
+    final res = await dio.get(_statusPath).timeout(timeout);
 
     if (!_loggedStatusRaw) {
       _loggedStatusRaw = true;
-      html.window.console.debug('[check-status] raw response: ${jsonEncode(res.data)}');
+      html.window.console.debug(
+        '[status] raw response: ${jsonEncode(res.data)}',
+      );
     }
 
-    final out = <String, StatusResult>{};
+    final out = <int, StatusResult>{};
     final data = res.data;
 
-    void add(String? url, dynamic v) {
-      if (url == null || v is! Map) return;
-      final online = v['online'];
-      out[normUrl(url)] = StatusResult(
+    void add(dynamic id, dynamic v) {
+      final key = id is int ? id : int.tryParse('$id');
+      if (key == null || v is! Map) return;
+      final online = v['online'] ?? v['status'];
+      out[key] = StatusResult(
         // null = BE không nói rõ → unknown, không phải offline.
         online: online is bool ? online : null,
         authRequired: v['authRequired'] == true,
         latencyMs: (v['latencyMs'] as num?)?.toInt(),
+        certWarning: v['certWarning'] == true,
       );
     }
 
     if (data is Map) {
-      data.forEach((k, v) => add('$k', v));
+      data.forEach(add);
     } else if (data is List) {
       for (final v in data) {
-        if (v is Map) add(v['url']?.toString(), v);
+        if (v is Map) add(v['id'], v);
       }
     }
     return out;
@@ -159,10 +165,7 @@ class WebsiteService {
   // Chụp lại: không truyền url → tất cả site.
   static Future<bool> refreshScreenshots({String? url}) async {
     try {
-      await dio.post(
-        _screenshotRefreshPath,
-        queryParameters: {'url': ?url},
-      );
+      await dio.post(_screenshotRefreshPath, queryParameters: {'url': ?url});
       return true;
     } catch (_) {
       return false;
@@ -172,10 +175,15 @@ class WebsiteService {
   // Ảnh screenshot. Phải encode URL (?, &, # bị cắt → ảnh lỗi);
   // t = capturedAt để cache-bust khi có ảnh mới.
   static String screenshotUrl(String url, {Object? t}) {
-    final q = 'url=${Uri.encodeQueryComponent(url)}'
+    final q =
+        'url=${Uri.encodeQueryComponent(url)}'
         '${t == null ? '' : '&t=${Uri.encodeQueryComponent('$t')}'}';
     return '${dio.options.baseUrl}$_screenshotPath?$q';
   }
+
+  // FAVICON: 200 = ảnh, 204 = không có. Cùng baseUrl với các API khác.
+  static String faviconUrl(int siteId) =>
+      '${dio.options.baseUrl}/api/websites/$siteId/favicon';
 
   // FILTER
   static Future<List<Website>> filter({

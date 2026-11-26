@@ -48,6 +48,10 @@ dependencies:
   uuid: ^4.3.3
   dio: ^5.9.2
   visibility_detector: ^0.4.0+2
+  # Inter / Space Grotesk / JetBrains Mono
+  google_fonts: ^6.2.1
+  # Icon nét mảnh, đồng bộ style (thay Material Icons)
+  lucide_icons_flutter: ^3.0.0
 
 dev_dependencies:
   flutter_test:
@@ -70,6 +74,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

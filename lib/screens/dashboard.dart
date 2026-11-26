@@ -1,27 +1,27 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:html' as html;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/services.dart';
 
 import '../models/website.dart';
 import '../services/screenshot_store.dart';
 import '../services/status_store.dart';
+import '../services/visit_store.dart';
 import '../services/website_service.dart';
 import '../theme/dash_theme.dart';
 import '../widgets/dash_ui.dart';
-import '../widgets/team_art.dart';
 import '../widgets/preview_dialog.dart';
 import '../widgets/sidebar.dart';
-import '../widgets/site_thumbnail.dart';
+import '../widgets/site_thumbnail.dart' show Shimmer;
+import '../widgets/team_art.dart' show DeptHealth;
+import '../widgets/theme_curtain.dart';
 import '../widgets/website_card.dart';
 
 enum StatusFilter { all, online, offline }
-
-enum SortBy { name, status, latency }
-
-enum ViewMode { grid, list, host }
 
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
@@ -40,12 +40,136 @@ class _DashboardState extends State<Dashboard>
   int _listVersion = 0;
   final StatusStore store = StatusStore();
   final ScreenshotStore shots = ScreenshotStore();
+  final VisitStore visits = VisitStore()..load();
 
   String selectedDepartment = kAllDept;
   StatusFilter statusFilter = StatusFilter.all;
-  SortBy sortBy = SortBy.name;
-  ViewMode viewMode = ViewMode.grid;
   String query = '';
+
+  /// Sidebar thu gọn (màn rộng), nhớ trong localStorage.
+  static const _collapsedKey = 'itpro.sidebarCollapsed';
+  bool _sidebarCollapsed = () {
+    try {
+      return html.window.localStorage[_collapsedKey] == '1';
+    } catch (_) {
+      return false;
+    }
+  }();
+
+  void _toggleSidebar() {
+    setState(() => _sidebarCollapsed = !_sidebarCollapsed);
+    try {
+      html.window.localStorage[_collapsedKey] = _sidebarCollapsed ? '1' : '0';
+    } catch (_) {}
+  }
+
+  /// Ẩn/hiện ảnh preview của TẤT CẢ card (mặc định hiện), nhớ trong localStorage.
+  static const _previewKey = 'itpro.showPreview';
+  bool _showPreview = () {
+    try {
+      return html.window.localStorage[_previewKey] != '0';
+    } catch (_) {
+      return true;
+    }
+  }();
+
+  /// Thứ tự kéo-thả của Frequently visited (danh sách id), lưu localStorage.
+  static const _favOrderKey = 'itpro.favOrder';
+  List<int> _favOrder = () {
+    try {
+      final raw = html.window.localStorage[_favOrderKey];
+      if (raw == null || raw.isEmpty) return <int>[];
+      return (jsonDecode(raw) as List)
+          .whereType<num>()
+          .map((e) => e.toInt())
+          .toList();
+    } catch (_) {
+      return <int>[];
+    }
+  }();
+
+  /// Site được gắn sao (ghim lên Frequently visited), lưu localStorage.
+  /// Không hết hạn — chỉ mất khi bỏ sao hoặc xoá dữ liệu trình duyệt.
+  static const _starKey = 'itpro.starred';
+  final Set<int> _starred = () {
+    try {
+      final raw = html.window.localStorage[_starKey];
+      if (raw == null || raw.isEmpty) return <int>{};
+      return (jsonDecode(raw) as List)
+          .whereType<num>()
+          .map((e) => e.toInt())
+          .toSet();
+    } catch (_) {
+      return <int>{};
+    }
+  }();
+
+  void _toggleStar(Website w) {
+    setState(() {
+      if (!_starred.remove(w.id)) _starred.add(w.id);
+    });
+    try {
+      html.window.localStorage[_starKey] = jsonEncode(_starred.toList());
+    } catch (_) {}
+  }
+
+  /// Nút X ở Frequently visited: bỏ sao (nếu có) + xoá lượt mở của site →
+  /// site biến mất khỏi khung, chỉ quay lại khi gắn sao hoặc mở lại nhiều.
+  void _removeFav(Website w) {
+    setState(() {
+      _starred.remove(w.id);
+      _favOrder.remove(w.id);
+    });
+    try {
+      html.window.localStorage[_starKey] = jsonEncode(_starred.toList());
+      html.window.localStorage[_favOrderKey] = jsonEncode(_favOrder);
+    } catch (_) {}
+    visits.forget(w.id);
+  }
+
+  /// Sắp [items] (đã theo số lượt mở) theo thứ tự người dùng kéo thả.
+  /// Site chưa từng được kéo → đứng sau, giữ thứ tự theo lượt mở.
+  List<Website> _applyFavOrder(List<Website> items) {
+    int rank(Website w) {
+      final i = _favOrder.indexOf(w.id);
+      return i < 0 ? 1 << 20 : i;
+    }
+
+    final base = {for (var i = 0; i < items.length; i++) items[i].id: i};
+    return [...items]..sort((a, b) {
+      final r = rank(a).compareTo(rank(b));
+      return r != 0 ? r : base[a.id]!.compareTo(base[b.id]!);
+    });
+  }
+
+  /// Thả [dragId] vào vị trí của [targetId] trong danh sách đang hiển thị.
+  void _moveFav(List<Website> shown, int dragId, int targetId) {
+    if (dragId == targetId) return;
+    final ids = shown.map((w) => w.id).toList();
+    final from = ids.indexOf(dragId);
+    final to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    ids.removeAt(from);
+    // Kéo sang phải → chèn SAU ô đích; kéo sang trái → chèn TRƯỚC ô đích.
+    ids.insert(
+      from < to ? ids.indexOf(targetId) + 1 : ids.indexOf(targetId),
+      dragId,
+    );
+
+    setState(() {
+      _favOrder = [...ids, ..._favOrder.where((id) => !ids.contains(id))];
+    });
+    try {
+      html.window.localStorage[_favOrderKey] = jsonEncode(_favOrder);
+    } catch (_) {}
+  }
+
+  void _togglePreviewAll() {
+    setState(() => _showPreview = !_showPreview);
+    try {
+      html.window.localStorage[_previewKey] = _showPreview ? '1' : '0';
+    } catch (_) {}
+  }
 
   bool loading = true;
   String? loadError;
@@ -118,6 +242,7 @@ class _DashboardState extends State<Dashboard>
     store.runVersion.removeListener(_onRunFinished);
     store.dispose();
     shots.dispose();
+    visits.dispose();
     _cooldownTimer?.cancel();
     _coolingDown.dispose();
     _spin.dispose();
@@ -154,7 +279,7 @@ class _DashboardState extends State<Dashboard>
       });
 
       final urls = data.map((e) => e.url.trim()).toList();
-      store.probeAll(urls);
+      store.refreshAll(data);
       shots.fetchAll(urls);
     } catch (e) {
       debugPrint('[INITIAL LOAD ERROR] $e');
@@ -213,7 +338,7 @@ class _DashboardState extends State<Dashboard>
       shots.fetchAll(urls);
     }
 
-    await store.probeAll(urls, markChecking: manual);
+    await store.refreshAll(all, markChecking: manual);
   }
 
   bool isSameWebsiteList(List<Website> a, List<Website> b) {
@@ -225,6 +350,8 @@ class _DashboardState extends State<Dashboard>
           x.name != y.name ||
           x.url != y.url ||
           x.type != y.type ||
+          x.icon != y.icon ||
+          x.iconUrl != y.iconUrl ||
           x.departmentName != y.departmentName) {
         return false;
       }
@@ -245,14 +372,9 @@ class _DashboardState extends State<Dashboard>
     }
   }
 
-  bool get _dependsOnStatus =>
-      statusFilter != StatusFilter.all ||
-      sortBy == SortBy.status ||
-      sortBy == SortBy.latency;
-
-  /// Card tự update tại chỗ; chỉ re-filter/sort khi lượt check xong.
+  /// Card tự update tại chỗ; chỉ re-filter/sort (offline lên đầu) khi lượt check xong.
   void _onRunFinished() {
-    if (mounted && _dependsOnStatus) setState(() {});
+    if (mounted) setState(() {});
   }
 
   // ============================================================
@@ -261,7 +383,21 @@ class _DashboardState extends State<Dashboard>
 
   bool _onKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
-    if (event.character != '/' && event.logicalKey != LogicalKeyboardKey.slash) {
+
+    // Ctrl+B (⌘B trên Mac): đóng/mở sidebar — hoạt động cả khi đang gõ search.
+    final kb = HardwareKeyboard.instance;
+    if (event.logicalKey == LogicalKeyboardKey.keyB &&
+        (kb.isControlPressed || kb.isMetaPressed) &&
+        !kb.isShiftPressed &&
+        !kb.isAltPressed) {
+      if (!(ModalRoute.of(context)?.isCurrent ?? true)) return false;
+      if (MediaQuery.sizeOf(context).width < 900) return false; // màn hẹp
+      _toggleSidebar();
+      return true;
+    }
+
+    if (event.character != '/' &&
+        event.logicalKey != LogicalKeyboardKey.slash) {
       return false;
     }
     if (_searchFocus.hasFocus) return false;
@@ -283,8 +419,17 @@ class _DashboardState extends State<Dashboard>
   }
 
   // ============================================================
-  // DERIVED DATA (memoized)
+  // DERIVED DATA
   // ============================================================
+
+  SiteStatus _st(Website w) => store.get(w.url.trim());
+
+  bool _inDept(Website w) =>
+      selectedDepartment == kAllDept || w.departmentName == selectedDepartment;
+
+  bool _matchQuery(Website w) =>
+      query.isEmpty ||
+      '${w.name} ${w.url} ${w.departmentName}'.toLowerCase().contains(query);
 
   Object? _memoKey;
   List<Website> _memo = const [];
@@ -294,55 +439,32 @@ class _DashboardState extends State<Dashboard>
       _listVersion,
       selectedDepartment,
       statusFilter,
-      sortBy,
       query,
-      _dependsOnStatus ? store.runVersion.value : 0,
+      store.runVersion.value,
     );
     if (key == _memoKey) return _memo;
 
     final list = all.where((w) {
-      if (selectedDepartment != kAllDept &&
-          w.departmentName != selectedDepartment) {
-        return false;
-      }
-      if (statusFilter != StatusFilter.all) {
-        final s = store.get(w.url.trim());
-        if (statusFilter == StatusFilter.online && !s.isReachable) return false;
-        if (statusFilter == StatusFilter.offline && !s.isOffline) return false;
-      }
-      if (query.isNotEmpty) {
-        final hay =
-            '${w.name} ${w.url} ${w.type} ${w.departmentName}'.toLowerCase();
-        if (!hay.contains(query)) return false;
-      }
+      if (!_inDept(w) || !_matchQuery(w)) return false;
+      final s = _st(w);
+      if (statusFilter == StatusFilter.online && !s.isReachable) return false;
+      if (statusFilter == StatusFilter.offline && !s.isOffline) return false;
       return true;
     }).toList();
 
-    int byName(Website a, Website b) =>
-        a.name.toLowerCase().compareTo(b.name.toLowerCase());
-
-    switch (sortBy) {
-      case SortBy.name:
-        list.sort(byName);
-      case SortBy.status:
-        int rank(Website w) => switch (store.get(w.url.trim()).state) {
-              SiteState.offline => 0,
-              SiteState.authRequired => 1,
-              SiteState.unknown => 2,
-              SiteState.checking => 3,
-              SiteState.online => 4,
-            };
-        list.sort((a, b) {
-          final r = rank(a).compareTo(rank(b));
-          return r != 0 ? r : byName(a, b);
-        });
-      case SortBy.latency:
-        int lat(Website w) => store.get(w.url.trim()).latencyMs ?? 1 << 30;
-        list.sort((a, b) {
-          final r = lat(a).compareTo(lat(b));
-          return r != 0 ? r : byName(a, b);
-        });
-    }
+    // Thứ tự phòng ban (để nhóm) → offline lên đầu trong nhóm → tên.
+    list.sort((a, b) {
+      final d = deptRank(
+        a.departmentName,
+      ).compareTo(deptRank(b.departmentName));
+      if (d != 0) return d;
+      final n = a.departmentName.compareTo(b.departmentName);
+      if (n != 0) return n;
+      final oa = _st(a).isOffline ? 0 : 1;
+      final ob = _st(b).isOffline ? 0 : 1;
+      if (oa != ob) return oa.compareTo(ob);
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
 
     _memoKey = key;
     _memo = list;
@@ -350,15 +472,18 @@ class _DashboardState extends State<Dashboard>
   }
 
   List<DeptHealth> _deptHealth() {
-    final names = all
-        .map((e) => e.departmentName)
-        .where((e) => e.trim().isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
+    final names =
+        all
+            .map((e) => e.departmentName)
+            .where((e) => e.trim().isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort((a, b) {
+            final r = deptRank(a).compareTo(deptRank(b));
+            return r != 0 ? r : a.compareTo(b);
+          });
 
     DeptHealth build(String name, Iterable<Website> sites) {
-      // Cùng 1 nguồn state với card + header "X/Y online".
       var online = 0;
       var offline = 0;
       var checking = 0;
@@ -388,13 +513,37 @@ class _DashboardState extends State<Dashboard>
     ];
   }
 
-  void _openPreview(Website w) {
+  int? _medianLatency() {
+    final l = [
+      for (final w in all)
+        if (_st(w).isReachable && _st(w).latencyMs != null) _st(w).latencyMs!,
+    ]..sort();
+    if (l.isEmpty) return null;
+    final mid = l.length ~/ 2;
+    return l.length.isOdd ? l[mid] : ((l[mid - 1] + l[mid]) / 2).round();
+  }
+
+  // ============================================================
+  // ACTIONS
+  // ============================================================
+
+  void _open(Website w) {
+    openInNewTab(w.url);
+    visits.record(w.id);
+  }
+
+  void _openLive(Website w) {
     showPreviewDialog(
       context,
       website: w,
       status: store.of(w.url.trim()),
       onRecapture: () => shots.refreshOne(w.url.trim()),
     );
+  }
+
+  void _selectDept(String v) {
+    if (v == selectedDepartment) return;
+    setState(() => selectedDepartment = v);
   }
 
   // ============================================================
@@ -404,460 +553,1053 @@ class _DashboardState extends State<Dashboard>
   @override
   Widget build(BuildContext context) {
     final c = context.dash;
-    final narrow = MediaQuery.sizeOf(context).width < 900;
+    final width = MediaQuery.sizeOf(context).width;
+    final narrow = width < 900;
+    final pad = width < 600 ? 16.0 : 24.0;
+    // Đủ chỗ (sidebar + tiêu đề + search 260 + filter + refresh) → 1 hàng.
+    final sideW = narrow
+        ? 0.0
+        : (_sidebarCollapsed ? Sidebar.railWidth : Sidebar.wideWidth);
+    final inlineTools = width - sideW >= 948;
+
+    Widget sidebar({required bool compact}) => ListenableBuilder(
+      listenable: store,
+      builder: (context, _) => Sidebar(
+        departments: _deptHealth(),
+        selected: selectedDepartment,
+        online: all.where((w) => _st(w).isReachable).length,
+        total: all.length,
+        compact: compact,
+        collapsed: _sidebarCollapsed,
+        onToggleCollapsed: _toggleSidebar,
+        onSelect: _selectDept,
+      ),
+    );
+
+    final scroll = CustomScrollView(
+      slivers: [
+        if (narrow) SliverToBoxAdapter(child: sidebar(compact: true)),
+
+        // Header (màn rộng: search + filter nằm cùng hàng tiêu đề)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(pad, narrow ? 12 : 16, pad, 0),
+            child: ListenableBuilder(
+              listenable: store,
+              builder: (context, _) => _Header(
+                tools: inlineTools
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final (i, t) in _toolbarItems(
+                            searchWidth: 260,
+                          ).indexed) ...[
+                            if (i > 0) const SizedBox(width: 10),
+                            t,
+                          ],
+                        ],
+                      )
+                    : null,
+                online: all.where((w) => _st(w).isReachable).length,
+                offline: all.where((w) => _st(w).isOffline).length,
+                total: all.length,
+                medianMs: _medianLatency(),
+                running: store.running,
+                lastRun: store.lastRun,
+                coolingDown: _coolingDown,
+                spin: _spin,
+                onRefresh: () => _refresh(manual: true),
+                showPreview: _showPreview,
+                onTogglePreview: _togglePreviewAll,
+              ),
+            ),
+          ),
+        ),
+
+        // Frequently visited
+        SliverToBoxAdapter(
+          child: ListenableBuilder(
+            listenable: Listenable.merge([store, visits]),
+            builder: (context, _) => _frequent(pad),
+          ),
+        ),
+
+        // Toolbar (chỉ khi không gom được vào header)
+        if (!inlineTools)
+          SliverToBoxAdapter(
+            child: ListenableBuilder(
+              listenable: store,
+              builder: (context, _) => _toolbar(pad, narrow),
+            ),
+          ),
+
+        // Offline banner
+        SliverToBoxAdapter(
+          child: ListenableBuilder(
+            listenable: store,
+            builder: (context, _) => _offlineBanner(pad),
+          ),
+        ),
+
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(pad, 12, pad, pad),
+          sliver: _body(),
+        ),
+      ],
+    );
 
     return Scaffold(
       backgroundColor: c.bg,
-      body: ListenableBuilder(
-        listenable: store,
-        builder: (context, child) {
-          final health = _deptHealth();
-          final online =
-              all.where((w) => store.get(w.url.trim()).isReachable).length;
-
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (!narrow)
-                Sidebar(
-                  departments: health,
-                  selected: selectedDepartment,
-                  online: online,
-                  total: all.length,
-                  onSelect: (v) => setState(() => selectedDepartment = v),
+      // Màn rộng: sidebar nằm ĐÈ lên nội dung (Stack). Nội dung chỉ đổi lề
+      // trái 1 lần khi bấm đóng/mở → lưới card layout lại đúng 1 lần, còn
+      // animation độ rộng chỉ chạy trên sidebar → mượt, không lag.
+      body: narrow
+          ? scroll
+          : Stack(
+              children: [
+                Positioned.fill(
+                  child: Padding(
+                    padding: EdgeInsets.only(left: sideW),
+                    child: scroll,
+                  ),
                 ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: sidebar(compact: false),
+                ),
+              ],
+            ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // FREQUENTLY VISITED
+  // ------------------------------------------------------------
+
+  /// Ô tối đa cho site "tự động" (mở nhiều nhất). Site gắn sao không giới hạn.
+  static const _autoFavSlots = 5;
+
+  Widget _frequent(double pad) {
+    // 1. Site gắn sao: luôn hiện (kể cả offline).
+    final starred = all.where((w) => _starred.contains(w.id)).toList();
+    // 2. Site mở nhiều nhất (30 ngày, đang online), chưa gắn sao →
+    //    lấp cho đủ 5 ô.
+    final auto =
+        all
+            .where(
+              (w) =>
+                  !_starred.contains(w.id) &&
+                  _st(w).isReachable &&
+                  visits.count(w.id) > 0,
+            )
+            .toList()
+          ..sort((a, b) => visits.count(b.id).compareTo(visits.count(a.id)));
+    final free = (_autoFavSlots - starred.length).clamp(0, _autoFavSlots);
+
+    final items = _applyFavOrder([...starred, ...auto.take(free)]);
+    if (items.isEmpty) return const SizedBox.shrink();
+    final c = context.dash;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(pad, 14, pad, 0),
+      // Cùng kiểu khung phòng ban: viền đen (Light) / trắng (Dark), bo 16.
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(11, 9, 11, 11),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: c.text),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Tiêu đề: ★ Frequently visited · số site
+            Padding(
+              padding: const EdgeInsets.fromLTRB(3, 0, 3, 9),
+              child: Tooltip(
+                message:
+                    'Site đã gắn sao ★ (luôn hiện) + site bạn mở nhiều nhất '
+                    'trong 30 ngày gần nhất. Kéo thả để đổi thứ tự.',
+                child: Row(
                   children: [
-                    _Header(
-                      online: online,
-                      total: all.length,
-                      running: store.running,
-                      coolingDown: _coolingDown,
-                      lastRun: store.lastRun,
-                      narrow: narrow,
-                      spin: _spin,
-                      searchCtrl: _searchCtrl,
-                      searchFocus: _searchFocus,
-                      onSearch: _onSearchChanged,
-                      statusFilter: statusFilter,
-                      onStatusFilter: (v) => setState(() => statusFilter = v),
-                      sortBy: sortBy,
-                      onSort: (v) => setState(() => sortBy = v),
-                      viewMode: viewMode,
-                      onViewMode: (v) => setState(() => viewMode = v),
-                      onRefresh: () => _refresh(manual: true),
-                    ),
-                    if (narrow) ...[
-                      const SizedBox(height: 8),
-                      DeptChipBar(
-                        departments: health,
-                        selected: selectedDepartment,
-                        onSelect: (v) => setState(() => selectedDepartment = v),
+                    const Icon(LucideIcons.star, size: 15, color: Brand.yellow),
+                    const SizedBox(width: 7),
+                    Text(
+                      'Frequently visited',
+                      style: displayText(
+                        size: 15,
+                        weight: FontWeight.w700,
+                        color: c.text,
                       ),
-                    ],
-                    Expanded(child: child!),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      '${items.length}',
+                      style: TextStyle(
+                        color: c.muted,
+                        fontSize: 12.5,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ],
-          );
-        },
-        // Nội dung chính không rebuild theo từng kết quả probe.
-        child: _Content(builder: _buildContent),
+            ),
+            // Dùng lại WebsiteCard (giống hệt card trong lưới: preview, chấm
+            // trạng thái, nút mở/copy, theo nút ẩn/hiện preview ở header).
+            // Độ rộng card theo cùng quy tắc lưới (tối thiểu 260px); không đủ
+            // chỗ cho cả 5 → cuộn ngang.
+            LayoutBuilder(
+              builder: (context, cons) {
+                const gap = 12.0;
+                const minW = 260.0;
+                final fit = ((cons.maxWidth + gap) / (minW + gap))
+                    .floor()
+                    .clamp(1, 99);
+                final scroll = items.length > fit;
+                final cardW = (cons.maxWidth - gap * (fit - 1)) / fit;
+
+                final row = IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < items.length; i++) ...[
+                        if (i > 0) const SizedBox(width: gap),
+                        SizedBox(
+                          width: scroll ? minW : cardW,
+                          // Kéo thả để đổi thứ tự (lưu itpro.favOrder).
+                          child: _FavSlot(
+                            id: items[i].id,
+                            width: scroll ? minW : cardW,
+                            onDrop: (dragId) =>
+                                _moveFav(items, dragId, items[i].id),
+                            card: RepaintBoundary(
+                              child: WebsiteCard(
+                                key: ValueKey('freq-${items[i].id}'),
+                                website: items[i],
+                                status: store.of(items[i].url.trim()),
+                                meta: shots.of(items[i].url.trim()),
+                                showPreview: _showPreview,
+                                onOpen: () => _open(items[i]),
+                                onOpenLive: () => _openLive(items[i]),
+                                starred: _starred.contains(items[i].id),
+                                onToggleStar: () => _toggleStar(items[i]),
+                                onRemove: () => _removeFav(items[i]),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+
+                return scroll
+                    ? SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: row,
+                      )
+                    : row;
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildContent(BuildContext context) {
-    if (loading) return const _SkeletonGrid();
+  // ------------------------------------------------------------
+  // TOOLBAR
+  // ------------------------------------------------------------
+
+  Widget _toolbar(double pad, bool narrow) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(pad, 14, pad, 0),
+      child: Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: _toolbarItems(searchWidth: narrow ? double.infinity : 320),
+      ),
+    );
+  }
+
+  /// Search + segmented; dùng chung cho toolbar riêng và header (màn rộng).
+  List<Widget> _toolbarItems({required double searchWidth}) {
+    var nAll = 0, nOn = 0, nOff = 0;
+    for (final w in all) {
+      if (!_inDept(w) || !_matchQuery(w)) continue;
+      nAll++;
+      final s = _st(w);
+      if (s.isReachable) nOn++;
+      if (s.isOffline) nOff++;
+    }
+
+    return [
+      SizedBox(
+        width: searchWidth,
+        child: _SearchField(
+          controller: _searchCtrl,
+          focusNode: _searchFocus,
+          onChanged: _onSearchChanged,
+        ),
+      ),
+      _Segmented(
+        value: statusFilter,
+        onChanged: (v) => setState(() => statusFilter = v),
+        items: [
+          (StatusFilter.all, 'All', nAll),
+          (StatusFilter.online, 'Online', nOn),
+          (StatusFilter.offline, 'Offline', nOff),
+        ],
+      ),
+    ];
+  }
+
+  // ------------------------------------------------------------
+  // OFFLINE BANNER
+  // ------------------------------------------------------------
+
+  Widget _offlineBanner(double pad) {
+    final off = all.where((w) => _inDept(w) && _st(w).isOffline).toList();
+    if (off.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(pad, 12, pad, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: context.tone.bannerBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: context.tone.offBorder),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(
+                LucideIcons.circleAlert,
+                size: 18,
+                color: context.tone.offFg,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: '${off.length} site offline: ',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    TextSpan(
+                      text: off
+                          .map((w) => '${w.name} (${displayHost(w.url)})')
+                          .join(', '),
+                    ),
+                  ],
+                ),
+                style: TextStyle(
+                  color: context.tone.bannerText,
+                  fontSize: 13,
+                  height: 1.45,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // GRID
+  // ------------------------------------------------------------
+
+  Widget _body() {
+    if (loading) {
+      return _cardGrid(
+        itemCount: 8,
+        itemBuilder: (_, _) => const _SkeletonCard(),
+      );
+    }
 
     if (loadError != null && all.isEmpty) {
-      return _EmptyState(
-        icon: Icons.wifi_off_rounded,
-        title: 'Could not load websites',
-        message: loadError!,
-        action: FilledButton.icon(
-          onPressed: _initialLoad,
-          icon: const Icon(Icons.refresh_rounded, size: 16),
-          label: const Text('Retry'),
+      return SliverToBoxAdapter(
+        child: _EmptyState(
+          icon: LucideIcons.wifiOff,
+          title: 'Could not load websites',
+          message: loadError!,
+          action: FilledButton.icon(
+            onPressed: _initialLoad,
+            style: FilledButton.styleFrom(
+              backgroundColor: context.dash.ink,
+              foregroundColor: context.dash.onInk,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(9),
+              ),
+            ),
+            icon: const Icon(LucideIcons.refreshCw, size: 16),
+            label: const Text('Retry'),
+          ),
         ),
       );
     }
 
     final data = filtered;
-
-    final Widget body;
     if (data.isEmpty) {
-      body = _EmptyState(
-        icon: Icons.search_off_rounded,
-        title: 'No websites match',
-        message: store.running && statusFilter != StatusFilter.all
-            ? 'Status check in progress…'
-            : 'Try another department, filter or search.',
+      return SliverToBoxAdapter(
+        child: _EmptyState(
+          icon: LucideIcons.searchX,
+          title: 'No websites match',
+          message: store.running && statusFilter != StatusFilter.all
+              ? 'Status check in progress…'
+              : 'Try another department, filter or search.',
+        ),
       );
-    } else {
-      body = switch (viewMode) {
-        ViewMode.grid => _buildGrid(data),
-        ViewMode.list => _buildList(data),
-        ViewMode.host => _buildByHost(data),
-      };
     }
 
-    // Tương đương View Transitions: cross-fade khi đổi filter/sort/view.
-    return AnimatedSwitcher(
-      duration: Motion.of(context),
-      switchInCurve: Motion.curve,
-      switchOutCurve: Motion.curve,
-      child: KeyedSubtree(
-        key: ValueKey(
-          '$selectedDepartment|$statusFilter|$sortBy|$viewMode|${data.isEmpty}',
+    // Nhóm theo phòng ban (data đã sort theo phòng ban).
+    final groups = <String, List<Website>>{};
+    for (final w in data) {
+      groups.putIfAbsent(w.departmentName, () => []).add(w);
+    }
+
+    // Thứ tự card toàn cục (cho stagger).
+    final order = {for (var i = 0; i < data.length; i++) data[i].id: i};
+
+    Widget card(Website w) => _Entrance(
+      key: ValueKey('card-${w.id}'),
+      index: order[w.id] ?? 0,
+      enabled: _stagger,
+      // Hover/animation trong 1 card không repaint cả grid.
+      child: RepaintBoundary(
+        child: WebsiteCard(
+          website: w,
+          status: store.of(w.url.trim()),
+          meta: shots.of(w.url.trim()),
+          showPreview: _showPreview,
+          onOpen: () => _open(w),
+          onOpenLive: () => _openLive(w),
+          starred: _starred.contains(w.id),
+          onToggleStar: () => _toggleStar(w),
         ),
-        child: body,
+      ),
+    );
+
+    Widget header(String dept) => ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final inDept = all.where((w) => w.departmentName == dept);
+        return _GroupHeader(
+          name: dept.isEmpty ? 'Other' : dept,
+          online: inDept.where((w) => _st(w).isReachable).length,
+          offline: inDept.where((w) => _st(w).isOffline).length,
+          total: inDept.length,
+        );
+      },
+    );
+
+    return _PackedGroups(
+      groups: groups.entries.map((e) => (e.key, e.value)).toList(),
+      cardBuilder: card,
+      headerBuilder: header,
+    );
+  }
+
+  /// grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap 14.
+  /// Chia theo hàng để card có thể cao khác nhau (preview mở).
+  Widget _cardGrid({
+    required int itemCount,
+    required IndexedWidgetBuilder itemBuilder,
+  }) {
+    const gap = 14.0;
+    const minW = 270.0;
+    return SliverLayoutBuilder(
+      builder: (context, cons) {
+        final cols = ((cons.crossAxisExtent + gap) / (minW + gap))
+            .floor()
+            .clamp(1, 99);
+        final rows = (itemCount / cols).ceil();
+        return SliverList.builder(
+          itemCount: rows,
+          itemBuilder: (context, r) => Padding(
+            padding: EdgeInsets.only(bottom: r == rows - 1 ? 0 : gap),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var j = 0; j < cols; j++) ...[
+                  if (j > 0) const SizedBox(width: gap),
+                  Expanded(
+                    child: r * cols + j < itemCount
+                        ? itemBuilder(context, r * cols + j)
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ============================================================
+// PACKED GROUPS: nhóm nhỏ nằm cạnh nhau trên cùng 1 lưới cột
+// ============================================================
+
+/// Lưới auto-fill minmax(270px, 1fr), gap 14. Mỗi nhóm phòng ban là 1 khối
+/// rộng đúng số card của nó (tối đa = số cột); các khối được xếp first-fit
+/// vào hàng còn chỗ → nhóm 1–2 site không để trống cả hàng.
+/// Cột card luôn thẳng hàng giữa các khối.
+class _PackedGroups extends StatelessWidget {
+  final List<(String, List<Website>)> groups;
+  final Widget Function(Website) cardBuilder;
+  final Widget Function(String dept) headerBuilder;
+
+  const _PackedGroups({
+    required this.groups,
+    required this.cardBuilder,
+    required this.headerBuilder,
+  });
+
+  /// Khoảng cách giữa card trong khung / giữa các khung.
+  static const gap = 12.0;
+  static const blockGap = 14.0;
+
+  /// Lề trong khung (+1px viền).
+  static const framePad = 11.0;
+  static const minW = 260.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverLayoutBuilder(
+      builder: (context, cons) {
+        final width = cons.crossAxisExtent;
+        // 1 cột = 1 card + phần khung; khung span n = n cột + (n-1) blockGap.
+        const overhead = framePad * 2 + 2;
+        final cols = ((width + blockGap) / (minW + overhead + blockGap))
+            .floor()
+            .clamp(1, 99);
+        final colW = (width - blockGap * (cols - 1)) / cols;
+
+        // First-fit: đặt khối vào hàng đầu tiên còn đủ cột, giữ thứ tự phòng ban.
+        final rows = <List<(String, List<Website>, int)>>[];
+        final free = <int>[];
+        for (final (dept, sites) in groups) {
+          final span = sites.length.clamp(1, cols);
+          var r = free.indexWhere((f) => f >= span);
+          if (r < 0) {
+            rows.add([]);
+            free.add(cols);
+            r = rows.length - 1;
+          }
+          rows[r].add((dept, sites, span));
+          free[r] -= span;
+        }
+
+        return SliverList.builder(
+          itemCount: rows.length,
+          itemBuilder: (context, r) => Padding(
+            padding: EdgeInsets.only(
+              bottom: r == rows.length - 1 ? 0 : blockGap,
+            ),
+            // Các khung trên cùng hàng CAO BẰNG NHAU (mép trên/dưới thẳng).
+            // Card không còn AnimatedSize nên IntrinsicHeight an toàn; chỉ
+            // chạy khi rebuild lưới (không chạy khi hover).
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final (i, (dept, sites, span)) in rows[r].indexed) ...[
+                    if (i > 0) const SizedBox(width: blockGap),
+                    SizedBox(
+                      width: span * colW + (span - 1) * blockGap,
+                      child: _block(
+                        context,
+                        dept,
+                        sites,
+                        span,
+                        span * colW + (span - 1) * blockGap,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _block(
+    BuildContext context,
+    String dept,
+    List<Website> sites,
+    int span,
+    double blockW,
+  ) {
+    final c = context.dash;
+    final lines = (sites.length / span).ceil();
+    // Trừ lề trong + viền 1px mỗi bên.
+    final inner = blockW - framePad * 2 - 2;
+    final cardW = (inner - gap * (span - 1)) / span;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(framePad, 9, framePad, framePad),
+      decoration: BoxDecoration(
+        // Không dùng màu phòng ban: chỉ viền đen (Light) / trắng (Dark).
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: c.text),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(3, 0, 3, 9),
+            child: headerBuilder(dept),
+          ),
+          if (lines == 1)
+            // 1 hàng card (khung nằm chung hàng với khung khác): card giãn
+            // hết chiều cao khung → card ở các khung cạnh nhau cũng bằng nhau.
+            Expanded(child: _cardLine(sites, 0, span, cardW))
+          else
+            for (var l = 0; l < lines; l++)
+              Padding(
+                padding: EdgeInsets.only(bottom: l == lines - 1 ? 0 : gap),
+                // Card trong cùng hàng cao bằng nhau.
+                child: IntrinsicHeight(child: _cardLine(sites, l, span, cardW)),
+              ),
+        ],
       ),
     );
   }
 
-  // ============================================================
-  // GRID: repeat(auto-fill, minmax(280px, 1fr)), gap 16
-  // ============================================================
-
-  Widget _buildGrid(List<Website> data) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final pad = constraints.maxWidth < 600 ? 16.0 : 24.0;
-        const gap = 16.0;
-        const minW = 280.0;
-        final width = constraints.maxWidth - pad * 2;
-        final count = ((width + gap) / (minW + gap)).floor().clamp(1, 99);
-        final itemW = (width - gap * (count - 1)) / count;
-        final extent = itemW * 9 / 16 + kCardBodyHeight + 2;
-
-        return GridView.builder(
-          padding: EdgeInsets.fromLTRB(pad, 8, pad, pad),
-          itemCount: data.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: count,
-            crossAxisSpacing: gap,
-            mainAxisSpacing: gap,
-            mainAxisExtent: extent,
-          ),
-          itemBuilder: (context, i) {
-            final w = data[i];
-            return _Entrance(
-              key: ValueKey('grid-${w.id}'),
-              index: i,
-              enabled: _stagger,
-              child: WebsiteCard(
-                website: w,
-                status: store.of(w.url.trim()),
-                meta: shots.of(w.url.trim()),
-                onPreview: () => _openPreview(w),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // ============================================================
-  // LIST
-  // ============================================================
-
-  Widget _buildList(List<Website> data) {
-    final pad = MediaQuery.sizeOf(context).width < 600 ? 16.0 : 24.0;
-    return ListView.separated(
-      padding: EdgeInsets.fromLTRB(pad, 8, pad, pad),
-      itemCount: data.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 6),
-      itemBuilder: (context, i) {
-        final w = data[i];
-        return _ListRow(
-          key: ValueKey('list-${w.id}'),
-          website: w,
-          status: store.of(w.url.trim()),
-          onPreview: () => _openPreview(w),
-        );
-      },
-    );
-  }
-
-  // ============================================================
-  // BY HOST (thay Tree / Ports)
-  // ============================================================
-
-  Widget _buildByHost(List<Website> data) {
-    final c = context.dash;
-    final groups = <String, List<Website>>{};
-    for (final w in data) {
-      groups.putIfAbsent(hostPort(w.url).host, () => []).add(w);
-    }
-    final hosts = groups.keys.toList()..sort();
-    final pad = MediaQuery.sizeOf(context).width < 600 ? 16.0 : 24.0;
-
-    return ListView.builder(
-      padding: EdgeInsets.fromLTRB(pad, 8, pad, pad),
-      itemCount: hosts.length,
-      itemBuilder: (context, i) {
-        final host = hosts[i];
-        final sites = groups[host]!
-          ..sort((a, b) => (hostPort(a.url).port ?? 0)
-              .compareTo(hostPort(b.url).port ?? 0));
-
-        final portCount = <int?, int>{};
-        for (final w in sites) {
-          final p = hostPort(w.url).port;
-          portCount[p] = (portCount[p] ?? 0) + 1;
-        }
-        final conflicts = portCount.values.where((n) => n > 1).length;
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          decoration: BoxDecoration(
-            color: c.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: c.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-                child: Row(
-                  children: [
-                    Icon(Icons.dns_rounded, size: 18, color: c.accent),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: SelectableText(
-                        host,
-                        maxLines: 1,
-                        style: TextStyle(
-                          color: c.text,
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    DashChip(
-                      label: '${sites.length} site${sites.length > 1 ? 's' : ''}'
-                          ' · ${portCount.length} port${portCount.length > 1 ? 's' : ''}',
-                    ),
-                    if (conflicts > 0) ...[
-                      const SizedBox(width: 6),
-                      DashChip(
-                        label: '$conflicts port conflict${conflicts > 1 ? 's' : ''}',
-                        color: c.bad,
-                        icon: Icons.warning_amber_rounded,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Divider(height: 1, color: c.border),
-              Padding(
-                padding: const EdgeInsets.all(6),
-                child: Column(
-                  children: [
-                    for (final w in sites)
-                      _ListRow(
-                        key: ValueKey('host-${w.id}'),
-                        website: w,
-                        status: store.of(w.url.trim()),
-                        onPreview: () => _openPreview(w),
-                        dense: true,
-                        portConflict:
-                            (portCount[hostPort(w.url).port] ?? 0) > 1,
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  /// 1 hàng card, card giãn theo chiều cao hàng (ảnh preview bám đáy card).
+  Widget _cardLine(List<Website> sites, int l, int span, double cardW) => Row(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (var j = 0; j < span && l * span + j < sites.length; j++) ...[
+        if (j > 0) const SizedBox(width: gap),
+        SizedBox(width: cardW, child: cardBuilder(sites[l * span + j])),
+      ],
+    ],
+  );
 }
 
 // ============================================================
-// CONTENT WRAPPER
-// ============================================================
-
-class _Content extends StatelessWidget {
-  final WidgetBuilder builder;
-  const _Content({required this.builder});
-
-  @override
-  Widget build(BuildContext context) => builder(context);
-}
-
-// ============================================================
-// HEADER (sticky)
+// HEADER
 // ============================================================
 
 class _Header extends StatelessWidget {
   final int online;
+  final int offline;
   final int total;
+  final int? medianMs;
   final bool running;
-  final ValueListenable<bool> coolingDown;
   final DateTime? lastRun;
-  final bool narrow;
+  final ValueListenable<bool> coolingDown;
   final Animation<double> spin;
-  final TextEditingController searchCtrl;
-  final FocusNode searchFocus;
-  final ValueChanged<String> onSearch;
-  final StatusFilter statusFilter;
-  final ValueChanged<StatusFilter> onStatusFilter;
-  final SortBy sortBy;
-  final ValueChanged<SortBy> onSort;
-  final ViewMode viewMode;
-  final ValueChanged<ViewMode> onViewMode;
   final VoidCallback onRefresh;
 
+  /// Search + filter đặt cùng hàng (màn rộng). null → toolbar riêng bên dưới.
+  final Widget? tools;
+
+  final bool showPreview;
+  final VoidCallback onTogglePreview;
+
   const _Header({
+    this.tools,
+    required this.showPreview,
+    required this.onTogglePreview,
     required this.online,
+    required this.offline,
     required this.total,
+    required this.medianMs,
     required this.running,
-    required this.coolingDown,
     required this.lastRun,
-    required this.narrow,
+    required this.coolingDown,
     required this.spin,
-    required this.searchCtrl,
-    required this.searchFocus,
-    required this.onSearch,
-    required this.statusFilter,
-    required this.onStatusFilter,
-    required this.sortBy,
-    required this.onSort,
-    required this.viewMode,
-    required this.onViewMode,
     required this.onRefresh,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = context.dash;
-    final pad = MediaQuery.sizeOf(context).width < 600 ? 16.0 : 24.0;
+    final t = context.tone;
+    final updated = running
+        ? 'checking…'
+        : (lastRun != null ? 'updated ${hms(lastRun!)}' : 'not checked yet');
+    final rest = [
+      if (medianMs != null) 'median $medianMs ms',
+      updated,
+    ].join(' · ');
 
-    final subtitle = StringBuffer('$online/$total online');
-    if (running) {
-      subtitle.write(' · checking…');
-    } else if (lastRun != null) {
-      subtitle.write(' · updated ${hms(lastRun!)}');
-    }
-
-    return Container(
-      padding: EdgeInsets.fromLTRB(pad, 18, pad, 14),
-      decoration: BoxDecoration(
-        color: c.bg,
-        border: Border(bottom: BorderSide(color: c.border)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Website Dashboard',
+              Text(
+                'Website Dashboard',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: displayText(
+                  size: 21,
+                  weight: FontWeight.w700,
+                  color: c.text,
+                  letterSpacing: -.3,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: offline > 0 ? t.dotBad : t.dotOk,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: '$online/$total online',
+                            style: TextStyle(
+                              color: c.text,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          TextSpan(text: ' · $rest'),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: c.text,
-                        fontSize: narrow ? 18 : 21,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -.2,
+                        color: c.muted,
+                        fontSize: 13,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        StatusDot(
-                          color: total > 0 && online == total ? c.ok : (running ? c.warn : c.bad),
-                          size: 6,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            subtitle.toString(),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: c.muted, fontSize: 12.5),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              ValueListenableBuilder<bool>(
-                valueListenable: coolingDown,
-                builder: (_, cooling, _) => _RefreshButton(
-                  spin: spin,
-                  running: running,
-                  coolingDown: cooling,
-                  onTap: onRefresh,
-                  compact: narrow,
-                ),
-              ),
-              const SizedBox(width: 6),
-              ValueListenableBuilder<ThemeMode>(
-                valueListenable: ThemeController.mode,
-                builder: (_, mode, _) => DashIconButton(
-                  icon: mode == ThemeMode.dark
-                      ? Icons.light_mode_rounded
-                      : Icons.dark_mode_rounded,
-                  tooltip: mode == ThemeMode.dark ? 'Light theme' : 'Dark theme',
-                  size: 18,
-                  onPressed: ThemeController.toggle,
-                ),
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              SizedBox(
-                width: narrow ? double.infinity : 280,
-                child: _SearchField(
-                  controller: searchCtrl,
-                  focusNode: searchFocus,
-                  onChanged: onSearch,
-                ),
-              ),
-              _Segmented<StatusFilter>(
-                value: statusFilter,
-                onChanged: onStatusFilter,
-                items: const {
-                  StatusFilter.all: ('All', null),
-                  StatusFilter.online: ('Online', null),
-                  StatusFilter.offline: ('Offline', null),
-                },
-              ),
-              _SortMenu(value: sortBy, onChanged: onSort),
-              _Segmented<ViewMode>(
-                value: viewMode,
-                onChanged: onViewMode,
-                items: const {
-                  ViewMode.grid: ('Grid', Icons.grid_view_rounded),
-                  ViewMode.list: ('List', Icons.view_list_rounded),
-                  ViewMode.host: ('By host', Icons.dns_rounded),
-                },
-              ),
-            ],
+        ),
+        if (tools != null) ...[const SizedBox(width: 16), tools!],
+        const SizedBox(width: 10),
+        _HeaderIconButton(
+          icon: showPreview ? LucideIcons.image : LucideIcons.imageOff,
+          tooltip: showPreview
+              ? 'Ẩn preview tất cả site'
+              : 'Hiện preview tất cả site',
+          active: showPreview,
+          onTap: onTogglePreview,
+        ),
+        const SizedBox(width: 8),
+        const _ThemeToggle(),
+        const SizedBox(width: 8),
+        ValueListenableBuilder<bool>(
+          valueListenable: coolingDown,
+          builder: (_, cooling, _) => _RefreshButton(
+            spin: spin,
+            running: running,
+            coolingDown: cooling,
+            onTap: onRefresh,
           ),
-        ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Nút icon 38px ở header (cùng kiểu nút theme). [active] = đang bật → nền
+/// xám nhạt + icon đậm; tắt → icon xám.
+class _HeaderIconButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _HeaderIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    return Tooltip(
+      message: tooltip,
+      child: HoverSurface(
+        onTap: onTap,
+        radius: 10,
+        color: active ? c.surface2 : c.surface,
+        hoverColor: c.surface2,
+        borderColor: c.border,
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: AnimatedSwitcher(
+            duration: Motion.of(context, Motion.fast),
+            child: Icon(
+              icon,
+              key: ValueKey(icon),
+              size: 18,
+              color: active ? c.text : c.muted,
+            ),
+          ),
+        ),
       ),
     );
   }
 }
+
+/// Nút đổi Light/Dark: cùng kích thước & viền với Refresh.
+class _ThemeToggle extends StatelessWidget {
+  const _ThemeToggle();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    final dark = context.isDark;
+
+    return Tooltip(
+      message: dark ? 'Chuyển sang Light' : 'Chuyển sang Dark',
+      child: Material(
+        color: c.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: c.border),
+        ),
+        child: InkWell(
+          onTap: () {
+            final curtain = ThemeCurtain.of(context);
+            if (curtain != null) {
+              curtain.toggle();
+            } else {
+              ThemeController.toggle(Theme.of(context).brightness);
+            }
+          },
+          customBorder: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: SizedBox(
+            width: 38,
+            height: 38,
+            child: AnimatedSwitcher(
+              duration: Motion.of(context, const Duration(milliseconds: 300)),
+              transitionBuilder: (child, a) => RotationTransition(
+                turns: Tween(begin: .75, end: 1.0).animate(a),
+                child: FadeTransition(opacity: a, child: child),
+              ),
+              child: Icon(
+                dark ? LucideIcons.moon : LucideIcons.sun,
+                key: ValueKey(dark),
+                size: 18,
+                color: dark ? Brand.yellow : c.text,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RefreshButton extends StatelessWidget {
+  final Animation<double> spin;
+  final bool running;
+  final bool coolingDown;
+  final VoidCallback onTap;
+
+  const _RefreshButton({
+    required this.spin,
+    required this.running,
+    required this.coolingDown,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    final disabled = running || coolingDown;
+
+    return Tooltip(
+      message: coolingDown && !running
+          ? 'Just refreshed — wait a few seconds'
+          : 'Re-capture screenshots & re-check all sites',
+      child: OutlinedButton.icon(
+        onPressed: disabled ? null : onTap,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: c.surface,
+          foregroundColor: c.text,
+          disabledForegroundColor: c.muted,
+          side: BorderSide(color: c.border),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        icon: RotationTransition(
+          turns: spin,
+          child: const Icon(LucideIcons.refreshCw, size: 17),
+        ),
+        label: Text(running ? 'Checking…' : 'Refresh'),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// GROUP HEADER (mỗi phòng ban)
+// ============================================================
+
+/// `KVH  ● 3/3` — chấm xanh nếu tất cả online, đỏ nếu có site offline.
+class _GroupHeader extends StatelessWidget {
+  final String name;
+  final int online;
+  final int offline;
+  final int total;
+
+  const _GroupHeader({
+    required this.name,
+    required this.online,
+    required this.offline,
+    required this.total,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    final t = context.tone;
+    return Row(
+      children: [
+        Text(
+          name,
+          style: displayText(size: 15, weight: FontWeight.w700, color: c.text),
+        ),
+        const SizedBox(width: 10),
+        Tooltip(
+          message: offline > 0
+              ? '$online/$total online · $offline offline'
+              : '$online/$total online',
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: offline > 0 ? t.dotBad : t.dotOk,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '$online/$total',
+                style: TextStyle(
+                  color: c.muted,
+                  fontSize: 12.5,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Spacer(),
+      ],
+    );
+  }
+}
+
+// ============================================================
+// FAV SLOT — kéo thả đổi thứ tự Frequently visited
+// ============================================================
+
+/// 1 ô trong Frequently visited: vừa kéo được (Draggable) vừa nhận thả
+/// (DragTarget).
+/// - Đang kéo: card bay theo chuột (bóng đổ), ô gốc mờ đi.
+/// - Rê qua ô khác: ô đó hiện viền đậm → biết sẽ thả vào đâu.
+/// - Bấm nhẹ (không kéo) vẫn dùng được nút / ảnh bình thường.
+class _FavSlot extends StatelessWidget {
+  final int id;
+  final double width;
+  final Widget card;
+  final ValueChanged<int> onDrop;
+
+  const _FavSlot({
+    required this.id,
+    required this.width,
+    required this.card,
+    required this.onDrop,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (d) => d.data != id,
+      onAcceptWithDetails: (d) => onDrop(d.data),
+      builder: (context, candidates, _) {
+        final over = candidates.isNotEmpty;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Draggable<int>(
+              data: id,
+              maxSimultaneousDrags: 1,
+              // Card bay theo chuột: cùng cỡ, có bóng, hơi trong suốt.
+              feedback: Material(
+                color: Colors.transparent,
+                elevation: 12,
+                shadowColor: Colors.black54,
+                borderRadius: BorderRadius.circular(12),
+                child: Opacity(
+                  opacity: .94,
+                  child: SizedBox(
+                    width: width,
+                    child: IntrinsicHeight(child: card),
+                  ),
+                ),
+              ),
+              childWhenDragging: Opacity(opacity: .3, child: card),
+              child: MouseRegion(cursor: SystemMouseCursors.grab, child: card),
+            ),
+            // Viền chỉ chỗ thả.
+            if (over)
+              IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: c.text, width: 2),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ============================================================
+// SEARCH / SEGMENTED
+// ============================================================
 
 class _SearchField extends StatelessWidget {
   final TextEditingController controller;
@@ -871,9 +1613,9 @@ class _SearchField extends StatelessWidget {
   });
 
   OutlineInputBorder _border(Color color, [double w = 1]) => OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: color, width: w),
-      );
+    borderRadius: BorderRadius.circular(10),
+    borderSide: BorderSide(color: color, width: w),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -893,39 +1635,48 @@ class _SearchField extends StatelessWidget {
           focusNode: focusNode,
           onChanged: onChanged,
           style: TextStyle(color: c.text, fontSize: 13.5),
-          cursorColor: c.accent,
+          cursorColor: c.text,
           decoration: InputDecoration(
             isDense: true,
             filled: true,
             fillColor: c.surface,
-            hintText: 'Search websites',
+            hintText: 'Search name, URL, department',
             hintStyle: TextStyle(color: c.muted, fontSize: 13.5),
-            prefixIcon: Icon(Icons.search_rounded, size: 18, color: c.muted),
+            prefixIcon: Icon(LucideIcons.search, size: 18, color: c.muted),
             prefixIconConstraints: const BoxConstraints(minWidth: 38),
             suffixIcon: value.text.isEmpty
                 ? Padding(
                     padding: const EdgeInsets.only(right: 10),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 1,
+                      ),
                       decoration: BoxDecoration(
                         border: Border.all(color: c.border),
                         borderRadius: BorderRadius.circular(5),
                       ),
-                      child: Text('/', style: TextStyle(color: c.muted, fontSize: 11.5)),
+                      child: Text(
+                        '/',
+                        style: TextStyle(color: c.muted, fontSize: 11.5),
+                      ),
                     ),
                   )
                 : IconButton(
                     tooltip: 'Clear',
-                    icon: Icon(Icons.close_rounded, size: 16, color: c.muted),
+                    icon: Icon(LucideIcons.x, size: 16, color: c.muted),
                     onPressed: () {
                       controller.clear();
                       onChanged('');
                     },
                   ),
-            suffixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            contentPadding: const EdgeInsets.symmetric(vertical: 11),
+            suffixIconConstraints: const BoxConstraints(
+              minWidth: 32,
+              minHeight: 32,
+            ),
+            contentPadding: const EdgeInsets.symmetric(vertical: 9),
             enabledBorder: _border(c.border),
-            focusedBorder: _border(c.accent, 1.5),
+            focusedBorder: _border(c.faint, 1.2),
           ),
         ),
       ),
@@ -933,10 +1684,10 @@ class _SearchField extends StatelessWidget {
   }
 }
 
-class _Segmented<T> extends StatelessWidget {
-  final T value;
-  final ValueChanged<T> onChanged;
-  final Map<T, (String, IconData?)> items;
+class _Segmented extends StatelessWidget {
+  final StatusFilter value;
+  final ValueChanged<StatusFilter> onChanged;
+  final List<(StatusFilter, String, int)> items;
 
   const _Segmented({
     required this.value,
@@ -959,40 +1710,49 @@ class _Segmented<T> extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          for (final e in items.entries)
+          for (final (key, label, count) in items)
             Semantics(
-              selected: e.key == value,
+              selected: key == value,
               button: true,
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  onTap: () => onChanged(e.key),
+                  onTap: () => onChanged(key),
                   borderRadius: BorderRadius.circular(7),
                   child: AnimatedContainer(
                     duration: d,
                     curve: Motion.curve,
-                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 11,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
-                      color: e.key == value ? c.accent : Colors.transparent,
+                      color: key == value ? c.ink : Colors.transparent,
                       borderRadius: BorderRadius.circular(7),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (e.value.$2 != null) ...[
-                          Icon(
-                            e.value.$2,
-                            size: 15,
-                            color: e.key == value ? Colors.white : c.muted,
-                          ),
-                          const SizedBox(width: 5),
-                        ],
                         Text(
-                          e.value.$1,
+                          label,
                           style: TextStyle(
-                            color: e.key == value ? Colors.white : c.muted,
+                            color: key == value ? c.onInk : c.text,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '$count',
+                          style: TextStyle(
+                            color: key == value
+                                ? c.onInk.withValues(alpha: .7)
+                                : (key == StatusFilter.offline && count > 0
+                                      ? context.tone.offFg
+                                      : c.muted),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),
                       ],
@@ -1003,301 +1763,6 @@ class _Segmented<T> extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
-}
-
-class _SortMenu extends StatelessWidget {
-  final SortBy value;
-  final ValueChanged<SortBy> onChanged;
-
-  const _SortMenu({required this.value, required this.onChanged});
-
-  static const _labels = {
-    SortBy.name: 'Name',
-    SortBy.status: 'Status',
-    SortBy.latency: 'Latency',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.dash;
-    return PopupMenuButton<SortBy>(
-      tooltip: 'Sort',
-      initialValue: value,
-      onSelected: onChanged,
-      color: c.surface,
-      position: PopupMenuPosition.under,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: c.border),
-      ),
-      itemBuilder: (_) => [
-        for (final e in _labels.entries)
-          PopupMenuItem(
-            value: e.key,
-            height: 38,
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 22,
-                  child: e.key == value
-                      ? Icon(Icons.check_rounded, size: 16, color: c.accent)
-                      : null,
-                ),
-                Text(e.value, style: TextStyle(color: c.text, fontSize: 13)),
-              ],
-            ),
-          ),
-      ],
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        decoration: BoxDecoration(
-          color: c.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: c.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.swap_vert_rounded, size: 16, color: c.muted),
-            const SizedBox(width: 6),
-            Text(
-              'Sort: ${_labels[value]}',
-              style: TextStyle(color: c.text, fontSize: 12.5, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(width: 4),
-            Icon(Icons.expand_more_rounded, size: 16, color: c.muted),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _RefreshButton extends StatelessWidget {
-  final Animation<double> spin;
-  final bool running;
-  final bool coolingDown;
-  final VoidCallback onTap;
-  final bool compact;
-
-  const _RefreshButton({
-    required this.spin,
-    required this.running,
-    required this.coolingDown,
-    required this.onTap,
-    required this.compact,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.dash;
-    final icon = RotationTransition(
-      turns: spin,
-      child: const Icon(Icons.refresh_rounded, size: 17),
-    );
-    final style = FilledButton.styleFrom(
-      backgroundColor: c.accent,
-      foregroundColor: Colors.white,
-      disabledBackgroundColor: c.accent.withValues(alpha: .55),
-      disabledForegroundColor: Colors.white,
-      padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14, vertical: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-    );
-
-    final disabled = running || coolingDown;
-
-    return Tooltip(
-      message: coolingDown && !running
-          ? 'Just refreshed — wait a few seconds'
-          : 'Re-capture screenshots & re-check all sites',
-      child: compact
-          ? FilledButton(onPressed: disabled ? null : onTap, style: style, child: icon)
-          : FilledButton.icon(
-              onPressed: disabled ? null : onTap,
-              style: style,
-              icon: icon,
-              label: Text(running ? 'Checking…' : 'Refresh'),
-            ),
-    );
-  }
-}
-
-// ============================================================
-// LIST ROW
-// ============================================================
-
-class _ListRow extends StatefulWidget {
-  final Website website;
-  final ValueListenable<SiteStatus> status;
-  final VoidCallback onPreview;
-  final bool dense;
-  final bool portConflict;
-
-  const _ListRow({
-    super.key,
-    required this.website,
-    required this.status,
-    required this.onPreview,
-    this.dense = false,
-    this.portConflict = false,
-  });
-
-  @override
-  State<_ListRow> createState() => _ListRowState();
-}
-
-class _ListRowState extends State<_ListRow> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.dash;
-    final w = widget.website;
-    final wide = MediaQuery.sizeOf(context).width >= 700;
-    final port = hostPort(w.url).port;
-
-    return ValueListenableBuilder<SiteStatus>(
-      valueListenable: widget.status,
-      builder: (context, s, _) {
-        final dotColor = switch (s.state) {
-          SiteState.online => c.ok,
-          SiteState.offline => c.bad,
-          SiteState.checking || SiteState.authRequired => c.warn,
-          SiteState.unknown => c.muted,
-        };
-
-        return Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: widget.onPreview,
-            onHover: (v) => setState(() => _hover = v),
-            borderRadius: BorderRadius.circular(10),
-            focusColor: c.accent.withValues(alpha: .14),
-            child: AnimatedContainer(
-              duration: Motion.of(context, Motion.fast),
-              curve: Motion.curve,
-              padding: EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: widget.dense ? 8 : 10,
-              ),
-              decoration: BoxDecoration(
-                color: widget.dense
-                    ? (_hover ? c.surface2 : Colors.transparent)
-                    : (_hover ? c.surface2 : c.surface),
-                borderRadius: BorderRadius.circular(10),
-                border: widget.dense
-                    ? null
-                    : Border(
-                        left: BorderSide(
-                          color: s.isReachable ? tagColor(w.type) : c.border,
-                          width: 3,
-                        ),
-                      ),
-              ),
-              child: Row(
-                children: [
-                  if (widget.dense)
-                    Container(
-                      width: 62,
-                      margin: const EdgeInsets.only(right: 10),
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: (widget.portConflict ? c.bad : c.accent)
-                            .withValues(alpha: .12),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        port == null ? 'default' : ':$port',
-                        style: TextStyle(
-                          color: widget.portConflict ? c.bad : c.accent,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ),
-                  StatusDot(color: dotColor, pulse: s.isOnline, size: 8),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          w.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: c.text,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Tooltip(
-                          message: w.url,
-                          child: Text(
-                            w.url,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: c.muted, fontSize: 12.5),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (wide) ...[
-                    const SizedBox(width: 12),
-                    TagChip(w.type),
-                    if (w.departmentName.isNotEmpty) ...[
-                      const SizedBox(width: 6),
-                      DashChip(label: w.departmentName),
-                    ],
-                    SizedBox(
-                      width: 92,
-                      child: Text(
-                        switch (s.state) {
-                          SiteState.online => '${s.latencyMs ?? '–'} ms',
-                          SiteState.offline => s.lastSeen == null
-                              ? 'offline'
-                              : 'seen ${relativeTime(s.lastSeen)}',
-                          SiteState.checking => 'checking…',
-                          SiteState.authRequired => 'login required',
-                          SiteState.unknown => 'not checked',
-                        },
-                        textAlign: TextAlign.right,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: s.isOffline ? c.bad : c.muted,
-                          fontSize: 12,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(width: 6),
-                  DashIconButton(
-                    icon: Icons.content_copy_rounded,
-                    tooltip: 'Copy URL',
-                    size: 15,
-                    onPressed: () => copyUrl(context, w.url),
-                  ),
-                  DashIconButton(
-                    icon: Icons.open_in_new_rounded,
-                    tooltip: 'Open in new tab',
-                    size: 16,
-                    onPressed: () => openInNewTab(w.url),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }
@@ -1358,70 +1823,60 @@ class _EntranceState extends State<_Entrance> {
 // SKELETON / EMPTY
 // ============================================================
 
-class _SkeletonGrid extends StatelessWidget {
-  const _SkeletonGrid();
+class _SkeletonCard extends StatelessWidget {
+  const _SkeletonCard();
 
   @override
   Widget build(BuildContext context) {
     final c = context.dash;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final pad = constraints.maxWidth < 600 ? 16.0 : 24.0;
-        const gap = 16.0;
-        final width = constraints.maxWidth - pad * 2;
-        final count = ((width + gap) / (280 + gap)).floor().clamp(1, 99);
-        final itemW = (width - gap * (count - 1)) / count;
+    Widget bar(double w, double h, [double r = 4]) => Container(
+      width: w,
+      height: h,
+      decoration: BoxDecoration(
+        color: c.surface2,
+        borderRadius: BorderRadius.circular(r),
+      ),
+    );
 
-        return GridView.builder(
-          physics: const NeverScrollableScrollPhysics(),
-          padding: EdgeInsets.fromLTRB(pad, 8, pad, pad),
-          itemCount: count * 2,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: count,
-            crossAxisSpacing: gap,
-            mainAxisSpacing: gap,
-            mainAxisExtent: itemW * 9 / 16 + kCardBodyHeight + 2,
-          ),
-          itemBuilder: (_, _) => Container(
-            decoration: BoxDecoration(
-              color: c.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: c.border),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    // Không đặt chiều cao cố định → tự cao theo nội dung, không thể overflow
+    // dù đổi cỡ icon / font.
+    // Cùng hình dạng card: ảnh 16:9 + hàng icon · tên · địa chỉ.
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: c.border),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+            child: Row(
               children: [
-                const AspectRatio(aspectRatio: 16 / 9, child: Shimmer()),
-                Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _bar(c, 140, 12),
-                      const SizedBox(height: 8),
-                      _bar(c, 200, 9),
-                      const SizedBox(height: 18),
-                      _bar(c, 70, 16),
-                    ],
-                  ),
+                bar(44, 44, 11),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    bar(120, 11),
+                    const SizedBox(height: 7),
+                    bar(150, 9),
+                  ],
                 ),
               ],
             ),
           ),
-        );
-      },
+          const Padding(
+            padding: EdgeInsets.fromLTRB(10, 0, 10, 10),
+            child: ScreenFrame(child: Shimmer()),
+          ),
+        ],
+      ),
     );
   }
-
-  Widget _bar(DashColors c, double w, double h) => Container(
-        width: w,
-        height: h,
-        decoration: BoxDecoration(
-          color: c.surface2,
-          borderRadius: BorderRadius.circular(4),
-        ),
-      );
 }
 
 class _EmptyState extends StatelessWidget {
@@ -1440,27 +1895,22 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.dash;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 40, color: c.muted),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: TextStyle(color: c.text, fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: c.muted, fontSize: 13),
-            ),
-            if (action != null) ...[const SizedBox(height: 16), action!],
-          ],
-        ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 56, horizontal: 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 36, color: c.muted),
+          const SizedBox(height: 12),
+          Text(title, style: displayText(size: 16, color: c.text)),
+          const SizedBox(height: 6),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: c.muted, fontSize: 13),
+          ),
+          if (action != null) ...[const SizedBox(height: 16), action!],
+        ],
       ),
     );
   }

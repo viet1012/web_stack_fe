@@ -1,10 +1,11 @@
 import 'dart:html' as html;
 
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
-// COLOR TOKENS (dark default + light)
+// COLOR TOKENS (light + dark)
 // ============================================================
 
 @immutable
@@ -22,6 +23,22 @@ class DashColors extends ThemeExtension<DashColors> {
   final Color warn;
   final Color shadow;
 
+  /// Chữ phụ đậm hơn muted (nav item chưa chọn).
+  final Color textSoft;
+
+  /// Xám nhạt: nhãn section, viền focus, chấm "not checked".
+  final Color faint;
+
+  /// Host/URL mono trên card.
+  final Color hostText;
+
+  /// Nền nút chính (Open hover, segmented đang chọn) + chữ trên nó.
+  final Color ink;
+  final Color onInk;
+
+  /// Nền nav item đang chọn (vàng nhạt).
+  final Color navActive;
+
   const DashColors({
     required this.bg,
     required this.surface,
@@ -35,36 +52,55 @@ class DashColors extends ThemeExtension<DashColors> {
     required this.bad,
     required this.warn,
     required this.shadow,
+    required this.textSoft,
+    required this.faint,
+    required this.hostText,
+    required this.ink,
+    required this.onInk,
+    required this.navActive,
   });
 
-  static const dark = DashColors(
-    bg: Color(0xFF0A0F1C),
-    surface: Color(0xFF111A2B),
-    surface2: Color(0xFF172238),
-    border: Color(0xFF1F2A40),
-    text: Color(0xFFE6EBF5),
-    muted: Color(0xFF8A96AD),
-    accent: Color(0xFF4F8CFF),
-    cyan: Color(0xFF22D3EE),
-    ok: Color(0xFF22C55E),
-    bad: Color(0xFFF43F5E),
-    warn: Color(0xFFF59E0B),
-    shadow: Color(0x99000000),
+  static const light = DashColors(
+    bg: Color(0xFFF6F7F9),
+    surface: Color(0xFFFFFFFF),
+    surface2: Color(0xFFF3F4F6),
+    border: Color(0xFFE5E7EB),
+    text: Color(0xFF111827),
+    muted: Color(0xFF5B6472),
+    accent: Color(0xFF111827),
+    cyan: Color(0xFF0891B2),
+    ok: Color(0xFF15803D),
+    bad: Color(0xFFB91C1C),
+    warn: Color(0xFFB45309),
+    shadow: Color(0x14111827),
+    textSoft: Color(0xFF4B5563),
+    faint: Color(0xFF9CA3AF),
+    hostText: Color(0xFF5B6472),
+    ink: Color(0xFF111827),
+    onInk: Color(0xFFFFFFFF),
+    navActive: Color(0xFFFFF4D6),
   );
 
-  static const light = DashColors(
-    bg: Color(0xFFF4F6FA),
-    surface: Color(0xFFFFFFFF),
-    surface2: Color(0xFFEDF1F7),
-    border: Color(0xFFDCE2EC),
-    text: Color(0xFF0F172A),
-    muted: Color(0xFF5B6780),
-    accent: Color(0xFF2F6FED),
-    cyan: Color(0xFF0891B2),
-    ok: Color(0xFF16A34A),
-    bad: Color(0xFFE11D48),
-    warn: Color(0xFFD97706),
-    shadow: Color(0x22101828),
+  /// Dark trung tính (graphite), không ám xanh navy; card sáng hơn nền 1 bậc.
+  static const dark = DashColors(
+    bg: Color(0xFF0D1015),
+    surface: Color(0xFF161A21),
+    surface2: Color(0xFF1F242D),
+    border: Color(0xFF2A303A),
+    text: Color(0xFFE8EAEE),
+    muted: Color(0xFF9AA3B1),
+    accent: Color(0xFFE8EAEE),
+    cyan: Color(0xFF22D3EE),
+    ok: Color(0xFF4ADE80),
+    bad: Color(0xFFF87171),
+    warn: Color(0xFFFBBF24),
+    shadow: Color(0x66000000),
+    textSoft: Color(0xFFC3C9D3),
+    faint: Color(0xFF6B7380),
+    hostText: Color(0xFF8F99A8),
+    ink: Color(0xFFE8EAEE),
+    onInk: Color(0xFF0D1015),
+    navActive: Color(0x29FFC93C),
   );
 
   @override
@@ -81,6 +117,12 @@ class DashColors extends ThemeExtension<DashColors> {
         bad: bad,
         warn: warn,
         shadow: shadow,
+        textSoft: textSoft,
+        faint: faint,
+        hostText: hostText,
+        ink: ink,
+        onInk: onInk,
+        navActive: navActive,
       );
 
   @override
@@ -100,12 +142,200 @@ class DashColors extends ThemeExtension<DashColors> {
       bad: l(bad, other.bad),
       warn: l(warn, other.warn),
       shadow: l(shadow, other.shadow),
+      textSoft: l(textSoft, other.textSoft),
+      faint: l(faint, other.faint),
+      hostText: l(hostText, other.hostText),
+      ink: l(ink, other.ink),
+      onInk: l(onInk, other.onInk),
+      navActive: l(navActive, other.navActive),
+    );
+  }
+}
+
+// ============================================================
+// STATUS TONES (chip / chấm / banner trạng thái)
+// ============================================================
+
+/// Ngưỡng "Slow".
+const int kSlowMs = 100;
+
+@immutable
+class StatusTone extends ThemeExtension<StatusTone> {
+  final Color okFg, okBg;
+  final Color slowFg, slowBg;
+  final Color offFg, offBg, offBorder;
+  final Color bannerBg, bannerText;
+  final Color idleFg, idleBg;
+
+  /// Chấm tổng ở header.
+  final Color dotOk, dotBad;
+
+  const StatusTone({
+    required this.okFg,
+    required this.okBg,
+    required this.slowFg,
+    required this.slowBg,
+    required this.offFg,
+    required this.offBg,
+    required this.offBorder,
+    required this.bannerBg,
+    required this.bannerText,
+    required this.idleFg,
+    required this.idleBg,
+    required this.dotOk,
+    required this.dotBad,
+  });
+
+  static const light = StatusTone(
+    okFg: Color(0xFF15803D),
+    okBg: Color(0xFFE9F7EE),
+    slowFg: Color(0xFFB45309),
+    slowBg: Color(0xFFFEF3E2),
+    offFg: Color(0xFFB91C1C),
+    offBg: Color(0xFFFEECEC),
+    offBorder: Color(0xFFF5C2C2),
+    bannerBg: Color(0xFFFEF2F2),
+    bannerText: Color(0xFF7F1D1D),
+    idleFg: Color(0xFF5B6472),
+    idleBg: Color(0xFFF3F4F6),
+    dotOk: Color(0xFF16A34A),
+    dotBad: Color(0xFFDC2626),
+  );
+
+  /// Dark: chữ sáng hơn, nền chip = màu chữ ~12% alpha.
+  static const dark = StatusTone(
+    okFg: Color(0xFF4ADE80),
+    okBg: Color(0x1F4ADE80),
+    slowFg: Color(0xFFFBBF24),
+    slowBg: Color(0x1FFBBF24),
+    offFg: Color(0xFFF87171),
+    offBg: Color(0x24F87171),
+    offBorder: Color(0x66F87171),
+    bannerBg: Color(0x17F87171),
+    bannerText: Color(0xFFFCA5A5),
+    idleFg: Color(0xFF9AA3B1),
+    idleBg: Color(0xFF1F242D),
+    dotOk: Color(0xFF22C55E),
+    dotBad: Color(0xFFEF4444),
+  );
+
+  @override
+  StatusTone copyWith() => this;
+
+  @override
+  StatusTone lerp(StatusTone? o, double t) {
+    if (o == null) return this;
+    Color l(Color a, Color b) => Color.lerp(a, b, t)!;
+    return StatusTone(
+      okFg: l(okFg, o.okFg),
+      okBg: l(okBg, o.okBg),
+      slowFg: l(slowFg, o.slowFg),
+      slowBg: l(slowBg, o.slowBg),
+      offFg: l(offFg, o.offFg),
+      offBg: l(offBg, o.offBg),
+      offBorder: l(offBorder, o.offBorder),
+      bannerBg: l(bannerBg, o.bannerBg),
+      bannerText: l(bannerText, o.bannerText),
+      idleFg: l(idleFg, o.idleFg),
+      idleBg: l(idleBg, o.idleBg),
+      dotOk: l(dotOk, o.dotOk),
+      dotBad: l(dotBad, o.dotBad),
     );
   }
 }
 
 extension DashContext on BuildContext {
   DashColors get dash => Theme.of(this).extension<DashColors>()!;
+  StatusTone get tone => Theme.of(this).extension<StatusTone>()!;
+  bool get isDark => Theme.of(this).brightness == Brightness.dark;
+
+  /// Màu phòng ban theo theme hiện tại.
+  DeptColor dept(String name) => deptColor(name, Theme.of(this).brightness);
+}
+
+// ============================================================
+// BRAND / FONTS
+// ============================================================
+
+class Brand {
+  /// Chỉ dùng cho logo IT PRO và nav item đang chọn.
+  static const yellow = Color(0xFFFFC93C);
+}
+
+// Cache style gốc theo (size, weight): GoogleFonts.*() mỗi lần gọi đều tra
+// font + đăng ký load → gọi hàng trăm lần mỗi lần rebuild sẽ chậm.
+final Map<(double, FontWeight), TextStyle> _displayCache = {};
+final Map<double, TextStyle> _monoCache = {};
+
+/// Space Grotesk — tiêu đề / số liệu.
+TextStyle displayText({
+  double size = 14,
+  FontWeight weight = FontWeight.w600,
+  Color? color,
+  double? height,
+  double? letterSpacing,
+}) =>
+    _displayCache
+        .putIfAbsent(
+          (size, weight),
+          () => GoogleFonts.spaceGrotesk(fontSize: size, fontWeight: weight),
+        )
+        .copyWith(color: color, height: height, letterSpacing: letterSpacing);
+
+/// JetBrains Mono — URL / host.
+TextStyle monoText({double size = 12, Color? color, double? height}) =>
+    _monoCache
+        .putIfAbsent(size, () => GoogleFonts.jetBrainsMono(fontSize: size))
+        .copyWith(color: color, height: height);
+
+// ============================================================
+// DEPARTMENT COLORS (fg / bg)
+// ============================================================
+
+@immutable
+class DeptColor {
+  final Color fg;
+  final Color bg;
+  const DeptColor(this.fg, this.bg);
+}
+
+/// Bảng màu light. Thứ tự cũng là thứ tự sort card.
+const Map<String, DeptColor> kDeptColors = {
+  'KVH': DeptColor(Color(0xFF1D4ED8), Color(0xFFE8EEFD)),
+  'PRO': DeptColor(Color(0xFFC2410C), Color(0xFFFDEEE4)),
+  'HR': DeptColor(Color(0xFF7C3AED), Color(0xFFF1EAFE)),
+  'IT': DeptColor(Color(0xFF4338CA), Color(0xFFE8E8FB)),
+  'MA': DeptColor(Color(0xFF0F766E), Color(0xFFE2F4F1)),
+  'PC': DeptColor(Color(0xFF15803D), Color(0xFFE4F4E9)),
+  'TE': DeptColor(Color(0xFFBE185D), Color(0xFFFCE7F1)),
+  'WH': DeptColor(Color(0xFF475569), Color(0xFFEDF0F4)),
+};
+
+/// Dark: chữ = màu gốc sáng lên (đủ tương phản trên nền tối),
+/// nền = màu gốc ~18% alpha.
+final Map<String, DeptColor> _deptDark = {
+  for (final e in kDeptColors.entries)
+    e.key: DeptColor(
+      Color.lerp(e.value.fg, Colors.white, .42)!,
+      e.value.fg.withValues(alpha: .2),
+    ),
+};
+
+const _deptAlias = {'PRODUCTION': 'PRO', 'WAREHOUSE': 'WH'};
+
+String _deptKey(String name) {
+  final k = name.trim().toUpperCase();
+  return _deptAlias[k] ?? k;
+}
+
+DeptColor deptColor(String name, [Brightness b = Brightness.light]) {
+  final map = b == Brightness.dark ? _deptDark : kDeptColors;
+  return map[_deptKey(name)] ?? map['WH']!;
+}
+
+int deptRank(String name) {
+  final i = kDeptColors.keys.toList().indexOf(_deptKey(name));
+  return i < 0 ? kDeptColors.length : i;
 }
 
 // ============================================================
@@ -151,30 +381,40 @@ class Motion {
   static bool reduced(BuildContext context) =>
       _prefersReduced || (MediaQuery.maybeDisableAnimationsOf(context) ?? false);
 
+  /// Bật trong đúng frame đổi theme: mọi AnimatedContainer/AnimatedSwitcher
+  /// đổi màu NGAY thay vì tự animate 200ms bên dưới tấm rèm (tránh cả trang
+  /// repaint liên tục trong lúc rèm đang kéo). Không gây rebuild thêm.
+  static bool instant = false;
+
   static Duration of(BuildContext context, [Duration base = normal]) =>
-      reduced(context) ? Duration.zero : base;
+      instant || reduced(context) ? Duration.zero : base;
 }
 
 // ============================================================
-// THEME MODE (saved in localStorage via shared_preferences)
+// THEME MODE (localStorage qua shared_preferences)
 // ============================================================
 
+/// Mặc định theo hệ điều hành; người dùng bấm đổi → nhớ lựa chọn.
 class ThemeController {
   static const _key = 'dash.themeMode';
 
-  static final mode = ValueNotifier<ThemeMode>(ThemeMode.dark);
+  static final mode = ValueNotifier<ThemeMode>(ThemeMode.system);
 
   static Future<void> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      mode.value =
-          prefs.getString(_key) == 'light' ? ThemeMode.light : ThemeMode.dark;
+      mode.value = switch (prefs.getString(_key)) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
     } catch (_) {}
   }
 
-  static Future<void> toggle() async {
+  /// Đổi sang theme ngược với theme đang hiển thị ([current]).
+  static Future<void> toggle(Brightness current) async {
     mode.value =
-        mode.value == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+        current == Brightness.dark ? ThemeMode.light : ThemeMode.dark;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
@@ -186,39 +426,56 @@ class ThemeController {
 }
 
 ThemeData buildDashTheme(Brightness brightness) {
-  final c = brightness == Brightness.dark ? DashColors.dark : DashColors.light;
+  final dark = brightness == Brightness.dark;
+  final c = dark ? DashColors.dark : DashColors.light;
+  final tone = dark ? StatusTone.dark : StatusTone.light;
 
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
     scaffoldBackgroundColor: c.bg,
-    fontFamily: 'Inter',
+    canvasColor: c.bg,
+    fontFamily: GoogleFonts.inter().fontFamily,
     fontFamilyFallback: const ['system-ui', 'Segoe UI', 'Roboto', 'Arial'],
     colorScheme: ColorScheme.fromSeed(
-      seedColor: c.accent,
+      seedColor: const Color(0xFF1D4ED8),
       brightness: brightness,
     ).copyWith(
       primary: c.accent,
+      onPrimary: c.onInk,
       surface: c.surface,
       error: c.bad,
       onSurface: c.text,
+      outline: c.border,
     ),
-    extensions: [c],
+    extensions: [c, tone],
     dividerColor: c.border,
-    focusColor: c.accent.withValues(alpha: .18),
+    focusColor: c.text.withValues(alpha: .12),
     hoverColor: c.surface2,
+    splashColor: c.text.withValues(alpha: .06),
+    highlightColor: c.text.withValues(alpha: .04),
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: c.text,
+      selectionColor: const Color(0xFF3B82F6).withValues(alpha: .3),
+    ),
+    scrollbarTheme: ScrollbarThemeData(
+      thumbColor: WidgetStatePropertyAll(c.faint.withValues(alpha: .5)),
+      radius: const Radius.circular(8),
+      thickness: const WidgetStatePropertyAll(6),
+    ),
     tooltipTheme: TooltipThemeData(
       waitDuration: const Duration(milliseconds: 400),
-      textStyle: TextStyle(color: c.bg, fontSize: 12),
+      textStyle: TextStyle(color: dark ? c.text : Colors.white, fontSize: 12),
       decoration: BoxDecoration(
-        color: c.text,
+        color: dark ? const Color(0xFF2A303A) : const Color(0xFF111827),
         borderRadius: BorderRadius.circular(6),
+        border: dark ? Border.all(color: const Color(0xFF3A414D)) : null,
       ),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: c.text,
-      contentTextStyle: TextStyle(color: c.bg, fontSize: 13),
+      backgroundColor: c.ink,
+      contentTextStyle: TextStyle(color: c.onInk, fontSize: 13),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ),
   );
