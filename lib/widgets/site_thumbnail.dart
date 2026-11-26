@@ -57,11 +57,19 @@ class SiteThumbnail extends StatefulWidget {
 
 class _SiteThumbnailState extends State<SiteThumbnail> {
   static const _timeout = Duration(seconds: 8);
+  static const _maxRetry = 2;
 
   bool _visible = false;
   String? _loadedSrc;
+
+  /// Ảnh lỗi hẳn (đã retry) → placeholder.
   final Set<String> _failed = {};
+
+  /// Quá 8s chưa về: hiện placeholder nhưng VẪN tải tiếp, về thì thay vào.
+  final Set<String> _slow = {};
+  final Map<String, int> _retries = {};
   Timer? _timer;
+  Timer? _retryTimer;
   String? _timerSrc;
 
   String get _url => widget.website.url;
@@ -84,8 +92,10 @@ class _SiteThumbnailState extends State<SiteThumbnail> {
       case ShotState.unknown:
         return null;
       case ShotState.loading:
+        // Đang chụp lại mà đã có ảnh cũ → hiện ảnh cũ, không skeleton.
+        if (m.hasImage) return true;
         if (m.isLoading) return null;
-        return m.hasImage; // poll hết 60s → như blank
+        return false; // poll hết 60s → như blank
       case ShotState.ok:
         return true;
       case ShotState.blank:
@@ -97,6 +107,7 @@ class _SiteThumbnailState extends State<SiteThumbnail> {
   @override
   void dispose() {
     _timer?.cancel();
+    _retryTimer?.cancel();
     super.dispose();
   }
 
@@ -105,18 +116,31 @@ class _SiteThumbnailState extends State<SiteThumbnail> {
     _timer?.cancel();
     _timerSrc = src;
     _timer = Timer(_timeout, () {
-      if (mounted && _loadedSrc != src) setState(() => _failed.add(src));
+      if (mounted && _loadedSrc != src) setState(() => _slow.add(src));
     });
   }
 
   void _loaded(String src) {
     if (!mounted || _loadedSrc == src) return;
     if (_timerSrc == src) _timer?.cancel();
-    setState(() => _loadedSrc = src);
+    setState(() {
+      _loadedSrc = src;
+      _slow.remove(src);
+    });
   }
 
   void _error(String src) {
-    if (!mounted || _failed.contains(src)) return;
+    if (!mounted || _failed.contains(src) || _retryTimer?.isActive == true) {
+      return;
+    }
+    final n = _retries[src] ?? 0;
+    if (n < _maxRetry) {
+      // Mạng chập chờn → thử lại (key mới để Image.network tải lại).
+      _retryTimer = Timer(Duration(seconds: 2 + n * 3), () {
+        if (mounted) setState(() => _retries[src] = n + 1);
+      });
+      return;
+    }
     if (_timerSrc == src) _timer?.cancel();
     setState(() => _failed.add(src));
   }
@@ -139,10 +163,14 @@ class _SiteThumbnailState extends State<SiteThumbnail> {
       });
     }
 
+    // Quá 8s mà chưa từng có ảnh → placeholder đè lên, ảnh vẫn tải phía dưới.
+    final slow = imageOk && _loadedSrc == null && _slow.contains(src);
+
     final Widget content;
     if (imageOk && (_visible || _loadedSrc != null)) {
-      content = Image.network(
+      final image = Image.network(
         src,
+        key: ValueKey('$src#${_retries[src] ?? 0}'),
         fit: BoxFit.cover,
         alignment: Alignment.topCenter,
         width: double.infinity,
@@ -164,6 +192,18 @@ class _SiteThumbnailState extends State<SiteThumbnail> {
           return const SizedBox.expand();
         },
       );
+      content = slow
+          ? Stack(
+              fit: StackFit.expand,
+              children: [
+                image,
+                ThumbPlaceholder(
+                  kind: thumbKindFor(widget.website),
+                  color: tagColor(widget.website.type),
+                ),
+              ],
+            )
+          : image;
     } else if (want == null || imageOk) {
       content = const SizedBox.expand();
     } else {
@@ -173,8 +213,9 @@ class _SiteThumbnailState extends State<SiteThumbnail> {
       );
     }
 
-    final showPlaceholder = want != null && !imageOk;
-    final showShimmer = want == null || (imageOk && _loadedSrc == null);
+    final showPlaceholder = (want != null && !imageOk) || slow;
+    final showShimmer =
+        want == null || (imageOk && _loadedSrc == null && !slow);
     final capturedAt = widget.meta.capturedAt;
     final reduce = Motion.reduced(context);
 

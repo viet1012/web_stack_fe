@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:html' as html;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -71,17 +73,72 @@ class ShotMeta {
 
 /// Meta screenshot từng URL (ValueNotifier riêng → thumbnail update tại chỗ).
 /// state == loading → poll /meta mỗi 5s, dừng sau 60s.
+///
+/// Meta lần trước được lưu localStorage → mở lại trang là hiện NGAY ảnh cũ
+/// (cùng `t=` → browser cache), không phải chờ /meta; /meta về thì cập nhật.
 class ScreenshotStore {
   static const concurrency = 6;
   static const pollEvery = Duration(seconds: 5);
   static const pollMax = Duration(seconds: 60);
+  static const _storageKey = 'itpro.shots';
 
   final Map<String, ValueNotifier<ShotMeta>> _items = {};
   final Map<String, Timer> _polls = {};
+  final Map<String, Map<String, dynamic>> _saved = _load();
+  Timer? _saveTimer;
   bool _disposed = false;
 
-  ValueNotifier<ShotMeta> of(String url) =>
-      _items.putIfAbsent(url, () => ValueNotifier(const ShotMeta()));
+  ValueNotifier<ShotMeta> of(String url) => _items.putIfAbsent(url, () {
+        final cached = _saved[url];
+        if (cached == null) return ValueNotifier(const ShotMeta());
+        // Chỉ dùng cache để hiện ảnh cũ; không coi là "loading" để tránh skeleton.
+        final m = ShotMeta.fromJson(cached);
+        return ValueNotifier(
+          m.hasImage
+              ? ShotMeta(
+                  state: ShotState.ok,
+                  capturedAt: m.capturedAt,
+                  capturedRaw: m.capturedRaw,
+                  hasImage: true,
+                )
+              : const ShotMeta(),
+        );
+      });
+
+  static Map<String, Map<String, dynamic>> _load() {
+    try {
+      final raw = html.window.localStorage[_storageKey];
+      if (raw == null) return {};
+      final m = jsonDecode(raw) as Map;
+      return {
+        for (final e in m.entries)
+          if (e.value is Map) '${e.key}': Map<String, dynamic>.from(e.value),
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  void _remember(String url, Map<String, dynamic> json) {
+    // Chỉ nhớ khi có ảnh; ảnh mất (hasImage=false) → xoá khỏi cache.
+    if (json['hasImage'] == true || '${json['state']}' == 'ok') {
+      _saved[url] = {
+        'state': json['state'],
+        'capturedAt': json['capturedAt'],
+        'hasImage': true,
+      };
+    } else {
+      _saved.remove(url);
+    }
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 500), _persist);
+  }
+
+  void _persist() {
+    try {
+      html.window.localStorage[_storageKey] = jsonEncode(_saved);
+    } catch (_) {}
+  }
 
   Future<void> fetchAll(Iterable<String> urls) async {
     final list = urls.where((u) => u.trim().isNotEmpty).toSet().toList();
@@ -102,7 +159,19 @@ class ScreenshotStore {
     final json = await WebsiteService.fetchScreenshotMeta(url);
     if (_disposed || json == null) return;
 
-    final meta = ShotMeta.fromJson(json);
+    var meta = ShotMeta.fromJson(json);
+    final prev = of(url).value;
+    // BE đang chụp (loading) mà không báo ảnh → giữ ảnh cũ đã biết.
+    if (meta.state == ShotState.loading && !meta.hasImage && prev.hasImage) {
+      meta = ShotMeta(
+        state: ShotState.loading,
+        capturedAt: prev.capturedAt,
+        capturedRaw: prev.capturedRaw,
+        hasImage: true,
+      );
+    } else {
+      _remember(url, json);
+    }
     of(url).value = meta;
 
     if (meta.state == ShotState.loading) {
@@ -139,6 +208,9 @@ class ScreenshotStore {
 
   void retain(Set<String> urls) {
     _items.removeWhere((url, _) => !urls.contains(url));
+    final before = _saved.length;
+    _saved.removeWhere((url, _) => !urls.contains(url));
+    if (_saved.length != before) _persist();
     _polls.removeWhere((url, t) {
       if (urls.contains(url)) return false;
       t.cancel();
@@ -148,6 +220,10 @@ class ScreenshotStore {
 
   void dispose() {
     _disposed = true;
+    if (_saveTimer?.isActive ?? false) {
+      _saveTimer!.cancel();
+      _persist();
+    }
     for (final t in _polls.values) {
       t.cancel();
     }
