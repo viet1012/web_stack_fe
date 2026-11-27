@@ -1,0 +1,21 @@
+{
+  // F5 → chọn cấu hình. Địa chỉ BE xem resolveApiBase() trong lib/services/website_service.dart
+  // --web-port cố định: cổng đổi = origin đổi = mất localStorage (đăng nhập, sao, cache ảnh…)
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FE · BE local (localhost:9999)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "chrome",
+      "args": ["--web-port=5000"]
+    },
+    {
+      "name": "FE · BE server (192.168.122.16:9095)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "chrome",
+      "args": ["--web-port=5000", "--dart-define=API_BASE=http://192.168.122.16:9095"]
+    }
+  ]
+}

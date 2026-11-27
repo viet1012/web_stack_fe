@@ -75,19 +75,19 @@ class _LoginDialogState extends State<LoginDialog> {
       maxWidth: 420,
       icon: LucideIcons.logIn,
       title: 'Đăng nhập',
-      subtitle: widget.reason ?? 'Dùng tài khoản nội bộ của bạn.',
+      subtitle: widget.reason ?? 'Dùng mã nhân viên của bạn.',
       onClose: () => Navigator.of(context).pop(false),
       child: AutofillGroup(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const SizedBox(height: 4),
-            const FieldLabel('Tên đăng nhập'),
+            const FieldLabel('Mã nhân viên'),
             DashTextField(
               controller: _user,
               autofocus: true,
-              icon: LucideIcons.user,
-              hint: 'vd. lan.nguyen',
+              icon: LucideIcons.idCard,
+              hint: 'vd. 12345',
               textInputAction: TextInputAction.next,
               autofillHints: const [AutofillHints.username],
               onChanged: (_) => setState(() => _error = null),
@@ -136,7 +136,11 @@ class _LoginDialogState extends State<LoginDialog> {
                       ),
                       child: Row(
                         children: [
-                          Icon(LucideIcons.circleAlert, size: 15, color: t.offFg),
+                          Icon(
+                            LucideIcons.circleAlert,
+                            size: 15,
+                            color: t.offFg,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
@@ -156,40 +160,12 @@ class _LoginDialogState extends State<LoginDialog> {
               height: 44,
               onPressed: _canSubmit ? _submit : null,
             ),
-            const SizedBox(height: 16),
-            // Ghi chú bản demo (xoá khi nối BE thật).
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: c.surface2,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(LucideIcons.flaskConical, size: 14, color: c.muted),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          const TextSpan(text: 'Bản demo: nhập '),
-                          TextSpan(
-                            text: 'admin',
-                            style: monoText(size: 12, color: c.text),
-                          ),
-                          const TextSpan(
-                            text:
-                                ' để có quyền duyệt; tên khác là người dùng '
-                                'thường. Mật khẩu bất kỳ (≥ 4 ký tự).',
-                          ),
-                        ],
-                      ),
-                      style: TextStyle(color: c.muted, fontSize: 12, height: 1.45),
-                    ),
-                  ),
-                ],
-              ),
+            const SizedBox(height: 14),
+            Text(
+              'Dùng tài khoản S-Patrol.'
+              'Quên mật khẩu: liên hệ IT.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: c.muted, fontSize: 12, height: 1.45),
             ),
           ],
         ),

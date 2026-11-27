@@ -5,17 +5,14 @@ import 'dart:typed_data';
 
 import 'package:flutter/painting.dart';
 
-/// Ảnh tối đa người dùng được chọn (trước khi thu nhỏ).
-const kPreviewMaxBytes = 5 * 1024 * 1024;
-
 /// Ảnh sau khi thu nhỏ: cạnh dài tối đa 1280px (card chỉ rộng ~300–400px).
 const _maxSide = 1280;
 
 /// Mở hộp chọn file ảnh của trình duyệt → thu nhỏ → JPEG data URL.
 /// Trả về null nếu người dùng huỷ. Lỗi → `error` là thông báo tiếng Việt.
 ///
-/// MOCK: lưu luôn data URL (~100–250 KB). Khi có BE: upload bytes lên
-/// (multipart) rồi lưu URL trả về thay cho data URL.
+/// data URL (~100–250 KB) được gửi kèm body /api/submissions; BE kiểm tra
+/// magic bytes, encode lại JPEG rồi lưu file, trả về `previewUrl`.
 Future<({String? dataUrl, String? error})?> pickPreviewImage() async {
   final input = html.FileUploadInputElement()
     ..accept = 'image/png,image/jpeg,image/webp';
@@ -31,9 +28,8 @@ Future<({String? dataUrl, String? error})?> pickPreviewImage() async {
   if (!file.type.startsWith('image/')) {
     return (dataUrl: null, error: 'Chỉ nhận ảnh PNG, JPG hoặc WebP');
   }
-  if (file.size > kPreviewMaxBytes) {
-    return (dataUrl: null, error: 'Ảnh quá lớn — tối đa 5 MB');
-  }
+  // Không giới hạn dung lượng ảnh gốc: luôn thu nhỏ còn cạnh dài 1280px +
+  // nén JPEG (~100–300 KB) trước khi gửi.
 
   try {
     final reader = html.FileReader()..readAsDataUrl(file);

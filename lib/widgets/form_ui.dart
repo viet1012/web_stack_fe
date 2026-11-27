@@ -519,6 +519,8 @@ InputDecoration dashInputDecoration(
         : Icon(icon, size: 17, color: error ? t.offFg : c.muted),
     prefixIconConstraints: const BoxConstraints(minWidth: 42),
     suffixIcon: suffix,
+    // Mặc định suffix ép cao 48px → ô chọn cao hơn ô nhập, chữ lệch.
+    suffixIconConstraints: const BoxConstraints(minWidth: 40),
     border: b(c.border),
     enabledBorder: b(idle, focused ? 1.5 : 1),
     focusedBorder: b(error ? t.offFg : c.text, 1.5),
@@ -595,6 +597,16 @@ class DashSelectField extends StatefulWidget {
   /// Nhãn hiển thị cho từng giá trị (mặc định = chính giá trị).
   final String Function(String)? labelOf;
 
+  /// Truyền vào nếu cần mở menu từ bên ngoài (vd. Enter ở ô trước).
+  final MenuController? controller;
+
+  /// Khác null → cuối menu có mục "＋ [createLabel]": bấm vào thì ô chuyển
+  /// sang nhập tay (Enter = xác nhận, Esc = huỷ). Giá trị nhập trùng một
+  /// option (không phân biệt hoa thường) → chọn option đó.
+  final String? createLabel;
+  final String? createHint;
+  final int createMaxLength;
+
   const DashSelectField({
     super.key,
     required this.options,
@@ -604,6 +616,10 @@ class DashSelectField extends StatefulWidget {
     this.icon,
     this.error,
     this.labelOf,
+    this.controller,
+    this.createLabel,
+    this.createHint,
+    this.createMaxLength = 30,
   });
 
   @override
@@ -611,15 +627,100 @@ class DashSelectField extends StatefulWidget {
 }
 
 class _DashSelectFieldState extends State<DashSelectField> {
-  final _ctrl = MenuController();
+  late final _ctrl = widget.controller ?? MenuController();
   bool _open = false;
 
+  /// Đang nhập giá trị mới.
+  bool _creating = false;
+  final _newCtrl = TextEditingController();
+  final _newFocus = FocusNode();
+
   String _label(String v) => widget.labelOf?.call(v) ?? v;
+
+  @override
+  void dispose() {
+    _newCtrl.dispose();
+    _newFocus.dispose();
+    super.dispose();
+  }
+
+  void _startCreate() {
+    _newCtrl.clear();
+    setState(() => _creating = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _newFocus.requestFocus();
+    });
+  }
+
+  void _cancelCreate() => setState(() => _creating = false);
+
+  void _confirmCreate() {
+    final v = _newCtrl.text.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (v.isEmpty) return _cancelCreate();
+    final same = widget.options.where(
+      (o) => o.toLowerCase() == v.toLowerCase(),
+    );
+    widget.onChanged(same.isNotEmpty ? same.first : v);
+    setState(() => _creating = false);
+  }
+
+  Widget _createField(BuildContext context) {
+    final c = context.dash;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Focus(
+          onKeyEvent: (_, e) {
+            if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.escape) {
+              _cancelCreate();
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: DashTextField(
+            controller: _newCtrl,
+            focusNode: _newFocus,
+            icon: LucideIcons.plus,
+            hint: widget.createHint ?? 'Nhập tên mới',
+            maxLength: widget.createMaxLength,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _confirmCreate(),
+            suffix: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Xác nhận (Enter)',
+                  onPressed: _confirmCreate,
+                  icon: Icon(LucideIcons.check, size: 16, color: c.text),
+                  visualDensity: VisualDensity.compact,
+                ),
+                IconButton(
+                  tooltip: 'Huỷ (Esc)',
+                  onPressed: _cancelCreate,
+                  icon: Icon(LucideIcons.x, size: 16, color: c.muted),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+          ),
+        ),
+        FieldMessage(error: widget.error),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = context.dash;
     final value = widget.value;
+    if (_creating) return _createField(context);
+
+    // Giá trị vừa nhập mới (chưa có trong danh sách) vẫn hiện trong menu.
+    final options = [
+      ...widget.options,
+      if (value != null && !widget.options.contains(value)) value,
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -636,7 +737,7 @@ class _DashSelectFieldState extends State<DashSelectField> {
               maximumSize: WidgetStatePropertyAll(Size(cons.maxWidth, 320)),
             ),
             menuChildren: [
-              for (final o in widget.options)
+              for (final o in options)
                 MenuItemButton(
                   onPressed: () => widget.onChanged(o),
                   trailingIcon: o == value
@@ -656,6 +757,23 @@ class _DashSelectFieldState extends State<DashSelectField> {
                   ),
                   child: Text(_label(o)),
                 ),
+              if (widget.createLabel != null) ...[
+                Divider(height: 9, color: c.border),
+                MenuItemButton(
+                  onPressed: _startCreate,
+                  leadingIcon: Icon(LucideIcons.plus, size: 15, color: c.text),
+                  style: MenuItemButton.styleFrom(
+                    foregroundColor: c.text,
+                    minimumSize: Size(cons.maxWidth, 38),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    textStyle: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  child: Text(widget.createLabel!),
+                ),
+              ],
             ],
             builder: (context, ctrl, _) => MouseRegion(
               cursor: SystemMouseCursors.click,
@@ -665,27 +783,37 @@ class _DashSelectFieldState extends State<DashSelectField> {
                 child: InputDecorator(
                   isEmpty: value == null,
                   isFocused: _open,
+                  textAlignVertical: TextAlignVertical.center,
                   decoration: dashInputDecoration(
                     context,
                     hint: widget.hint,
                     icon: widget.icon,
                     error: widget.error != null,
                     focused: _open,
-                    suffix: AnimatedRotation(
-                      turns: _open ? .5 : 0,
-                      duration: Motion.of(context, Motion.fast),
-                      child: Icon(
-                        LucideIcons.chevronDown,
-                        size: 16,
-                        color: c.muted,
-                      ),
-                    ),
                   ),
-                  child: Text(
-                    value == null ? '' : _label(value),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: c.text, fontSize: 14),
+                  // Mũi tên nằm trong child (không dùng suffixIcon — suffixIcon
+                  // ép cao 48px làm ô chọn cao hơn ô nhập & chữ bị lệch).
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          value == null ? '' : _label(value),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: c.text, fontSize: 14),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      AnimatedRotation(
+                        turns: _open ? .5 : 0,
+                        duration: Motion.of(context, Motion.fast),
+                        child: Icon(
+                          LucideIcons.chevronDown,
+                          size: 16,
+                          color: c.muted,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -867,14 +995,70 @@ String timeAgoVi(DateTime t) {
   var s = input.trim();
   if (s.isEmpty) return (null, 'Nhập địa chỉ website');
   if (s.contains(' ')) return (null, 'Địa chỉ không được chứa khoảng trắng');
-  if (!RegExp(r'^[a-z][a-z0-9+.\-]*://', caseSensitive: false).hasMatch(s)) {
+  if (s.contains('\\')) {
+    return (null, 'Dùng dấu "/" thay cho "\\". Sửa thành: ${s.replaceAll('\\', '/')}');
+  }
+
+  // Tự sửa phần đầu thiếu "//" hoặc ":": "http:192…", "http:/192…", "http//192…"
+  final head = RegExp(r'^(https?)(:/?|//)(?!/)', caseSensitive: false)
+      .firstMatch(s);
+  if (head != null && !s.contains('://')) {
+    s = '${head.group(1)!.toLowerCase()}://${s.substring(head.end)}';
+  }
+  final schemeMatch =
+      RegExp(r'^([a-z][a-z0-9+.\-]*)://', caseSensitive: false).firstMatch(s);
+  if (schemeMatch != null) {
+    final scheme = schemeMatch.group(1)!.toLowerCase();
+    if (scheme != 'http' && scheme != 'https') {
+      return (null,
+          '"$scheme://" không hợp lệ — chỉ dùng http:// hoặc https://');
+    }
+  } else {
     s = 'http://$s';
   }
+
+  // Tách host[:port] để báo lỗi cụ thể trước khi parse.
+  final rest = s.substring(s.indexOf('://') + 3);
+  final authority = rest.split(RegExp(r'[/?#]')).first;
+  if (authority.isEmpty || authority.startsWith(':')) {
+    return (null, 'Thiếu địa chỉ máy (IP hoặc tên miền) trước dấu ":"');
+  }
+  if (authority.contains(',')) {
+    return (null,
+        'Dùng dấu chấm "." thay cho dấu phẩy ",". Sửa thành: ${s.replaceAll(',', '.')}');
+  }
+  final colon = authority.lastIndexOf(':');
+  final host = colon >= 0 ? authority.substring(0, colon) : authority;
+  final portStr = colon >= 0 ? authority.substring(colon + 1) : null;
+  if (host.contains(':')) {
+    return (null, 'Có nhiều hơn một dấu ":" trong "$authority"');
+  }
+  if (portStr != null) {
+    final port = int.tryParse(portStr);
+    if (portStr.isEmpty) {
+      return (null, 'Thiếu số cổng sau dấu ":" (vd: $host:8080)');
+    }
+    if (port == null || port < 1 || port > 65535) {
+      return (null, 'Cổng "$portStr" không hợp lệ — phải là số từ 1 đến 65535');
+    }
+  }
+  if (RegExp(r'^[\d.]+$').hasMatch(host)) {
+    final parts = host.split('.');
+    if (parts.length != 4 || parts.any((p) => p.isEmpty)) {
+      return (null,
+          'IP "$host" chưa đúng — cần đủ 4 phần, vd: 192.168.1.10');
+    }
+    final bad = parts.firstWhere((p) => int.parse(p) > 255, orElse: () => '');
+    if (bad.isNotEmpty) {
+      return (null, 'IP "$host" sai ở phần "$bad" — mỗi phần chỉ từ 0 đến 255');
+    }
+  } else if (!(host.contains('.') || host == 'localhost' || portStr != null)) {
+    return (null,
+        '"$host" thiếu tên miền hoặc cổng — vd: $host.local hoặc $host:8080');
+  }
+
   final uri = Uri.tryParse(s);
-  if (uri == null ||
-      !(uri.scheme == 'http' || uri.scheme == 'https') ||
-      uri.host.isEmpty ||
-      !(uri.host.contains('.') || uri.host == 'localhost' || uri.hasPort)) {
+  if (uri == null || uri.host.isEmpty) {
     return (null, 'Địa chỉ chưa đúng. Ví dụ: http://192.168.1.10:8080');
   }
   while (s.endsWith('/')) {

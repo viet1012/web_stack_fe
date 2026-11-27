@@ -142,7 +142,7 @@ class _WebsiteCardState extends State<WebsiteCard> {
                                     message:
                                         w.owner == auth.user?.username
                                         ? 'Private · chỉ bạn và admin thấy'
-                                        : 'Private · của ${w.owner ?? '—'}',
+                                        : 'Private · của ${w.ownerName ?? w.owner ?? '—'}',
                                     child: Icon(
                                       LucideIcons.lock,
                                       size: 12.5,

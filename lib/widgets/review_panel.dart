@@ -5,6 +5,7 @@ import '../models/submission.dart';
 import '../services/auth_store.dart';
 import '../services/preview_image.dart';
 import '../services/submission_store.dart';
+import '../services/website_service.dart' show apiErrorMessage;
 import '../theme/dash_theme.dart';
 import 'dash_ui.dart' show breakableHost, openInNewTab;
 import 'form_ui.dart';
@@ -29,34 +30,63 @@ class ReviewPanel extends StatefulWidget {
 class _ReviewPanelState extends State<ReviewPanel> {
   bool _history = false;
 
-  void _toast(String text, Submission old) {
+  /// Đang gửi duyệt / từ chối → khoá nút của site đó.
+  final Set<int> _busy = {};
+
+  void _snack(String text, {VoidCallback? undo}) {
     final m = ScaffoldMessenger.of(context);
     m.hideCurrentSnackBar();
     m.showSnackBar(
       SnackBar(
         content: Text(text),
-        action: SnackBarAction(
-          label: 'Hoàn tác',
-          textColor: context.dash.onInk,
-          onPressed: () => submissions.restore(old),
-        ),
+        action: undo == null
+            ? null
+            : SnackBarAction(
+                label: 'Hoàn tác',
+                textColor: context.dash.onInk,
+                onPressed: undo,
+              ),
       ),
     );
   }
 
-  void _approve(Submission s) {
-    final me = auth.user;
-    if (me == null) return;
-    submissions.approve(s.id, me);
-    _toast('Đã phê duyệt “${s.name}” — đang hiện công khai', s);
+  /// Hoàn tác duyệt / từ chối → đưa về lại hàng chờ.
+  Future<void> _reopen(Submission s) async {
+    try {
+      await submissions.reopen(s.id);
+    } catch (e) {
+      if (mounted) _snack(apiErrorMessage(e, 'Không hoàn tác được'));
+    }
   }
 
-  void _reject(Submission s, String reason) {
-    final me = auth.user;
-    if (me == null) return;
-    submissions.reject(s.id, me, reason);
-    _toast('Đã từ chối “${s.name}”', s);
+  Future<void> _run(
+    Submission s,
+    Future<Submission> Function() action,
+    String done,
+  ) async {
+    if (!auth.isAdmin || _busy.contains(s.id)) return;
+    setState(() => _busy.add(s.id));
+    try {
+      await action();
+      if (mounted) _snack(done, undo: () => _reopen(s));
+    } catch (e) {
+      if (mounted) _snack(apiErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _busy.remove(s.id));
+    }
   }
+
+  void _approve(Submission s) => _run(
+    s,
+    () => submissions.approve(s.id),
+    'Đã phê duyệt “${s.name}” — đang hiện công khai',
+  );
+
+  void _reject(Submission s, String reason) => _run(
+    s,
+    () => submissions.reject(s.id, reason),
+    'Đã từ chối “${s.name}”',
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -105,11 +135,18 @@ class _ReviewPanelState extends State<ReviewPanel> {
                         items: pending,
                         empty: 'Không còn website nào chờ duyệt',
                         emptyIcon: LucideIcons.circleCheck,
-                        builder: (s) => _PendingItem(
+                        builder: (s) => AbsorbPointer(
                           key: ValueKey(s.id),
-                          s: s,
-                          onApprove: () => _approve(s),
-                          onReject: (r) => _reject(s, r),
+                          absorbing: _busy.contains(s.id),
+                          child: AnimatedOpacity(
+                            opacity: _busy.contains(s.id) ? .5 : 1,
+                            duration: Motion.of(context, Motion.fast),
+                            child: _PendingItem(
+                              s: s,
+                              onApprove: () => _approve(s),
+                              onReject: (r) => _reject(s, r),
+                            ),
+                          ),
                         ),
                       ),
               ),
@@ -169,7 +206,6 @@ class _PendingItem extends StatefulWidget {
   final ValueChanged<String> onReject;
 
   const _PendingItem({
-    super.key,
     required this.s,
     required this.onApprove,
     required this.onReject,
@@ -263,14 +299,14 @@ class _PendingItemState extends State<_PendingItem> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               MiniChip(
-                label: s.owner,
+                label: s.ownerLabel,
                 icon: LucideIcons.user,
                 fg: c.textSoft,
                 bg: c.surface2,
               ),
               MiniChip(label: s.department, fg: c.textSoft, bg: c.surface2),
               Text(
-                'Gửi ${timeAgoVi(s.createdAt)}',
+                'Gửi ${timeAgoVi(s.submittedAt)}',
                 style: TextStyle(color: c.faint, fontSize: 12),
               ),
             ],
@@ -475,9 +511,9 @@ class _HistoryItem extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  '${s.owner} · ${s.department} · '
+                  '${s.ownerLabel} · ${s.department} · '
                   '${s.isRejected ? 'từ chối' : 'duyệt'} bởi '
-                  '${s.reviewedBy ?? '—'} ${timeAgoVi(s.reviewedAt!)}',
+                  '${s.reviewerLabel ?? '—'} ${timeAgoVi(s.reviewedAt!)}',
                   style: TextStyle(color: c.muted, fontSize: 12),
                 ),
                 if (s.isRejected && (s.rejectReason ?? '').isNotEmpty) ...[

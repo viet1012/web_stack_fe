@@ -6,8 +6,9 @@ import '../models/website.dart';
 import '../services/auth_store.dart';
 import '../services/preview_image.dart';
 import '../services/submission_store.dart';
+import '../services/website_service.dart';
 import '../theme/dash_theme.dart';
-import 'dash_ui.dart' show displayHost;
+import 'login_dialog.dart' show ensureLoggedIn;
 import 'form_ui.dart';
 
 /// Dialog "Thêm website" (hoặc sửa & gửi lại khi có [edit]).
@@ -55,6 +56,24 @@ class _UploadDialogState extends State<UploadDialog> {
   late final _name = TextEditingController(text: widget.edit?.name ?? '');
   late final _note = TextEditingController(text: widget.edit?.note ?? '');
   final _urlFocus = FocusNode();
+  final _nameFocus = FocusNode();
+  final _deptMenu = MenuController();
+
+  /// Chuyển sang ô Tên và bôi đen sẵn → gõ để thay, Enter để giữ.
+  void _focusName() {
+    _nameFocus.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _name.selection =
+          TextSelection(baseOffset: 0, extentOffset: _name.text.length);
+    });
+  }
+
+  /// Enter ở ô Tên → mở danh sách Phòng ban (nếu chưa chọn).
+  void _openDept() {
+    _nameFocus.unfocus();
+    if (_dept == null) _deptMenu.open();
+  }
 
   late SiteVisibility _vis = widget.edit?.visibility ?? SiteVisibility.public;
   late String? _dept = widget.edit?.department;
@@ -91,6 +110,9 @@ class _UploadDialogState extends State<UploadDialog> {
   bool get _isEdit => widget.edit != null;
   bool get _public => _vis == SiteVisibility.public;
 
+  /// IT (admin) thêm / sửa → hiện ngay, không cần duyệt.
+  bool get _needsReview => _public && !auth.isAdmin;
+
   @override
   void initState() {
     super.initState();
@@ -106,6 +128,34 @@ class _UploadDialogState extends State<UploadDialog> {
           if (s != null) _name.text = s;
         }
       });
+      if (url != null && !_nameTouched) _fetchTitle(url);
+    });
+  }
+
+  /// URL đang/đã lấy tên — tránh gọi lại khi blur nhiều lần cùng URL.
+  String? _titleUrl;
+  bool _fetchingTitle = false;
+
+  /// Lấy tên website từ BE (title trang) rồi điền vào "Tên hiển thị".
+  /// Không đè nếu user đã tự gõ tên, hoặc URL đã đổi trong lúc chờ.
+  Future<void> _fetchTitle(String url) async {
+    if (_titleUrl == url) return;
+    _titleUrl = url;
+    setState(() => _fetchingTitle = true);
+    final title = await WebsiteService.fetchPageTitle(url);
+    if (!mounted || _titleUrl != url) return;
+    setState(() {
+      _fetchingTitle = false;
+      if (title != null && !_nameTouched) {
+        final t = title.length > 40 ? title.substring(0, 40).trim() : title;
+        // Đang đứng ở ô Tên → bôi đen để gõ thay được ngay.
+        _name.value = TextEditingValue(
+          text: t,
+          selection: _nameFocus.hasFocus
+              ? TextSelection(baseOffset: 0, extentOffset: t.length)
+              : TextSelection.collapsed(offset: t.length),
+        );
+      }
     });
   }
 
@@ -115,6 +165,7 @@ class _UploadDialogState extends State<UploadDialog> {
     _name.dispose();
     _note.dispose();
     _urlFocus.dispose();
+    _nameFocus.dispose();
     super.dispose();
   }
 
@@ -128,6 +179,7 @@ class _UploadDialogState extends State<UploadDialog> {
     if (err != null) return err;
     final key = _key(url!);
     for (final w in widget.systemSites) {
+      if (w.id == widget.edit?.id) continue;
       if (_key(w.url) == key) return 'Đã có trên dashboard: “${w.name}”';
     }
     final dup = submissions.byUrl(url);
@@ -139,46 +191,67 @@ class _UploadDialogState extends State<UploadDialog> {
     return null;
   }
 
+  /// Lỗi BE trả về khi gửi (trùng URL, hết phiên, mất mạng…).
+  String? _serverError;
+
   String? get _nameError =>
       _tried && _name.text.trim().isEmpty ? 'Nhập tên hiển thị' : null;
 
   String? get _deptError => _tried && _dept == null ? 'Chọn phòng ban' : null;
 
-  static String _key(String url) => displayHost(url).toLowerCase();
+  /// Khoá so trùng giống BE: bỏ scheme, lowercase, bỏ "/" cuối.
+  static String _key(String url) => url
+      .trim()
+      .toLowerCase()
+      .replaceFirst(RegExp(r'^https?://'), '')
+      .replaceFirst(RegExp(r'/+$'), '');
 
   Future<void> _submit() async {
     setState(() => _tried = true);
     if (_urlError != null || _nameError != null || _deptError != null) return;
-    final user = auth.user;
-    if (user == null) return;
+    if (!auth.loggedIn || _busy) return;
 
-    setState(() => _busy = true);
-    final (url, _) = normalizeUrl(_url.text);
-    final note = _public ? _note.text.trim() : '';
-    final s = _isEdit
-        ? await submissions.update(
-            widget.edit!.id,
-            name: _name.text.trim(),
-            url: url!,
-            department: _dept!,
-            visibility: _vis,
-            note: note,
-            previewImage: _image,
-          )
-        : await submissions.submit(
-            owner: user,
-            name: _name.text.trim(),
-            url: url!,
-            department: _dept!,
-            visibility: _vis,
-            note: note,
-            previewImage: _image,
-          );
-    if (!mounted) return;
     setState(() {
-      _busy = false;
-      _done = s;
+      _busy = true;
+      _serverError = null;
     });
+    final (url, _) = normalizeUrl(_url.text);
+    final note = _needsReview ? _note.text.trim() : '';
+    try {
+      final s = _isEdit
+          ? await submissions.update(
+              widget.edit!.id,
+              name: _name.text.trim(),
+              url: url!,
+              department: _dept!,
+              visibility: _vis,
+              note: note,
+              previewImage: _image,
+            )
+          : await submissions.submit(
+              name: _name.text.trim(),
+              url: url!,
+              department: _dept!,
+              visibility: _vis,
+              note: note,
+              previewImage: _image,
+            );
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _done = s;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _serverError = apiErrorMessage(e, 'Không gửi được, vui lòng thử lại');
+      });
+      // Hết phiên → mở lại đăng nhập; đăng nhập xong bấm gửi lại.
+      if (!auth.loggedIn) {
+        await ensureLoggedIn(context, reason: 'Phiên đăng nhập đã hết hạn.');
+      }
+    }
   }
 
   // ------------------------------------------------------------
@@ -219,16 +292,16 @@ class _UploadDialogState extends State<UploadDialog> {
         icon: LucideIcons.globe,
         title: 'Public',
         body: 'Ai cũng xem được, không cần đăng nhập.',
-        tagIcon: LucideIcons.clock,
-        tag: 'Cần admin duyệt',
-        tagWarn: true,
+        tagIcon: auth.isAdmin ? LucideIcons.zap : LucideIcons.clock,
+        tag: auth.isAdmin ? 'Hiện ngay (IT)' : 'Cần IT duyệt',
+        tagWarn: !auth.isAdmin,
         onTap: () => setState(() => _vis = SiteVisibility.public),
       ),
       _VisibilityOption(
         selected: !_public,
         icon: LucideIcons.lock,
         title: 'Private',
-        body: 'Chỉ bạn và admin thấy. Phải đăng nhập.',
+        body: 'Chỉ bạn và IT thấy. Phải đăng nhập.',
         tagIcon: LucideIcons.zap,
         tag: 'Hiện ngay',
         tagWarn: false,
@@ -256,11 +329,13 @@ class _UploadDialogState extends State<UploadDialog> {
         ),
         DashTextField(
           controller: _name,
+          focusNode: _nameFocus,
           icon: LucideIcons.type,
-          hint: 'vd. Quản lý khuôn',
+          hint: _fetchingTitle ? 'Đang lấy tên website…' : 'vd. Quản lý khuôn',
           maxLength: 40,
           textInputAction: TextInputAction.next,
           error: _nameError,
+          onSubmitted: (_) => _openDept(),
           onChanged: (_) {
             _nameTouched = true;
             if (_tried) setState(() {});
@@ -277,8 +352,11 @@ class _UploadDialogState extends State<UploadDialog> {
         DashSelectField(
           options: widget.departments,
           value: _dept,
+          controller: _deptMenu,
           icon: LucideIcons.building2,
           hint: 'Chọn phòng ban',
+          createLabel: 'Thêm phòng ban mới',
+          createHint: 'Tên phòng ban mới',
           error: _deptError,
           onChanged: (d) => setState(() => _dept = d),
         ),
@@ -295,16 +373,20 @@ class _UploadDialogState extends State<UploadDialog> {
       footer: Row(
         children: [
           Icon(
-            _public ? LucideIcons.shieldCheck : LucideIcons.eyeOff,
+            _needsReview
+                ? LucideIcons.shieldCheck
+                : (_public ? LucideIcons.globe : LucideIcons.eyeOff),
             size: 15,
             color: c.muted,
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              _public
-                  ? 'Hiện công khai sau khi admin phê duyệt.'
-                  : 'Hiện ngay — chỉ bạn và admin thấy.',
+              _needsReview
+                  ? 'Hiện công khai sau khi IT phê duyệt.'
+                  : _public
+                  ? 'Hiện công khai ngay.'
+                  : 'Hiện ngay — chỉ bạn và IT thấy.',
               style: TextStyle(color: c.muted, fontSize: 12.5, height: 1.35),
             ),
           ),
@@ -317,10 +399,10 @@ class _UploadDialogState extends State<UploadDialog> {
             const SizedBox(width: 6),
           ],
           DashButton(
-            label: _public
+            label: _needsReview
                 ? (_isEdit ? 'Gửi lại' : 'Gửi duyệt')
                 : (_isEdit ? 'Lưu' : 'Thêm website'),
-            icon: _public ? LucideIcons.send : LucideIcons.plus,
+            icon: _needsReview ? LucideIcons.send : LucideIcons.plus,
             loading: _busy,
             onPressed: _submit,
           ),
@@ -348,6 +430,14 @@ class _UploadDialogState extends State<UploadDialog> {
             textInputAction: TextInputAction.next,
             error: _urlError,
             helper: 'Website phải truy cập được từ mạng nội bộ.',
+            onSubmitted: (_) {
+              // Hợp lệ → sang ô Tên; sai → ở lại ô URL để sửa.
+              if (normalizeUrl(_url.text).$2 == null) {
+                _focusName();
+              } else {
+                _urlFocus.requestFocus();
+              }
+            },
             onChanged: (_) {
               if (_urlBlurred || _tried) setState(() {});
             },
@@ -406,17 +496,17 @@ class _UploadDialogState extends State<UploadDialog> {
             duration: Motion.of(context),
             curve: Motion.curve,
             alignment: Alignment.topCenter,
-            child: _public
+            child: _needsReview
                 ? Padding(
                     padding: const EdgeInsets.only(top: 18),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const FieldLabel('Ghi chú cho admin', optional: true),
+                        const FieldLabel('Ghi chú cho IT', optional: true),
                         DashTextField(
                           controller: _note,
                           hint:
-                              'Website dùng để làm gì, ai dùng? Giúp admin '
+                              'Website dùng để làm gì, ai dùng? Giúp IT '
                               'duyệt nhanh hơn.',
                           maxLines: 3,
                           maxLength: 200,
@@ -425,6 +515,38 @@ class _UploadDialogState extends State<UploadDialog> {
                     ),
                   )
                 : const SizedBox(width: double.infinity),
+          ),
+
+          // Lỗi từ máy chủ khi gửi.
+          if (_serverError != null) ...[
+            const SizedBox(height: 16),
+            _ErrorNote(text: _serverError!),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorNote extends StatelessWidget {
+  final String text;
+  const _ErrorNote({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tone;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: t.offBg,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Icon(LucideIcons.circleAlert, size: 15, color: t.offFg),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text, style: TextStyle(color: t.offFg, fontSize: 13)),
           ),
         ],
       ),
@@ -624,7 +746,7 @@ class _PreviewPicker extends StatelessWidget {
         Text(
           has
               ? 'Hiện trên thẻ website thay cho ảnh chụp tự động.'
-              : 'Hoặc tải ảnh lên · PNG, JPG, WebP · tối đa 5 MB',
+              : 'Hoặc tải ảnh lên · PNG, JPG, WebP · tự thu nhỏ',
           style: TextStyle(color: c.muted, fontSize: 12.5, height: 1.4),
         ),
         const SizedBox(height: 8),
@@ -750,7 +872,7 @@ class _RejectNote extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Admin đã từ chối',
+                  'IT đã từ chối',
                   style: TextStyle(
                     color: t.offFg,
                     fontSize: 13,
@@ -824,9 +946,11 @@ class _Success extends StatelessWidget {
                 ),
                 TextSpan(
                   text: pending
-                      ? ' sẽ hiện cho mọi người sau khi admin phê duyệt. '
+                      ? ' sẽ hiện cho mọi người sau khi IT phê duyệt. '
                             'Bạn có thể theo dõi ở mục Website của tôi.'
-                      : ' đã hiện trên dashboard — chỉ bạn và admin thấy.',
+                      : s.isPrivate
+                      ? ' đã hiện trên dashboard — chỉ bạn và IT thấy.'
+                      : ' đã hiện công khai trên dashboard.',
                 ),
               ],
             ),
@@ -845,7 +969,7 @@ class _Success extends StatelessWidget {
                 _StepLine(color: t.okFg),
                 _Step(
                   icon: LucideIcons.clock,
-                  label: 'Admin duyệt',
+                  label: 'IT duyệt',
                   fg: t.slowFg,
                   bg: t.slowBg,
                   current: true,

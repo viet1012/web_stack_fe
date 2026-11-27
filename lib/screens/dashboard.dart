@@ -16,6 +16,7 @@ import '../services/submission_store.dart';
 import '../services/visit_store.dart';
 import '../services/website_service.dart';
 import '../theme/dash_theme.dart';
+import '../widgets/site_icons.dart' show SiteIcon;
 import '../widgets/account_button.dart';
 import '../widgets/dash_ui.dart';
 import '../widgets/form_ui.dart' show showSidePanel;
@@ -62,14 +63,14 @@ class _DashboardState extends State<Dashboard>
   // DATA
   // ============================================================
 
-  /// Site hiển thị = site hệ thống ([_remote], từ BE) + site người dùng thêm
-  /// mà user hiện tại được xem (Public đã duyệt, Private của mình / admin).
+  /// Site hiển thị = GET /api/websites. BE đã lọc theo người xem: site hệ
+  /// thống + site người dùng đã duyệt (Public) + Private của mình (admin: hết).
   List<Website> all = [];
   List<Website> _remote = [];
   int _listVersion = 0;
 
   void _mergeAll() {
-    all = [..._remote, ...submissions.visibleFor(auth.user)];
+    all = [..._remote];
     _listVersion++;
   }
 
@@ -79,15 +80,39 @@ class _DashboardState extends State<Dashboard>
       if (w.previewImage == null) w.url.trim(),
   ];
 
-  /// Đăng nhập/đăng xuất, thêm/duyệt site → tính lại danh sách hiển thị.
-  /// Site mới xuất hiện (chưa có ảnh tự tải) → lấy ảnh chụp tự động ngay.
+  /// Đăng nhập/đăng xuất, thêm/duyệt/xoá site → tải lại danh sách từ BE
+  /// (quyền xem thay đổi). Site mới xuất hiện → lấy ảnh chụp ngay.
+  String? _lastAccount;
+  bool? _lastAdmin;
+
   void _onAccountChanged() {
-    if (!mounted) return;
-    final before = _shotUrls.toSet();
-    setState(_mergeAll);
-    if (loading) return;
-    for (final url in _shotUrls) {
-      if (!before.contains(url)) shots.fetchOne(url);
+    final u = auth.user;
+    if (u?.username == _lastAccount && u?.isAdmin == _lastAdmin) return;
+    _lastAccount = u?.username;
+    _lastAdmin = u?.isAdmin;
+    _reloadSites();
+  }
+
+  Future<void> _reloadSites() async {
+    if (!mounted || loading) return;
+    try {
+      final data = await WebsiteService.fetchWebsites();
+      if (!mounted || isSameWebsiteList(_remote, data)) return;
+      final before = all.map((e) => e.url.trim()).toSet();
+      setState(() {
+        _remote = data;
+        _mergeAll();
+      });
+      final keep = all.map((e) => e.url.trim()).toSet();
+      store.retain(keep);
+      shots.retain(keep);
+      final fresh = all.where((w) => !before.contains(w.url.trim())).toList();
+      for (final w in fresh) {
+        if (w.previewImage == null) shots.fetchOne(w.url.trim());
+      }
+      if (fresh.isNotEmpty) store.refreshAll(all);
+    } catch (e) {
+      debugPrint('[RELOAD SITES ERROR] $e');
     }
   }
   final StatusStore store = StatusStore();
@@ -466,8 +491,10 @@ class _DashboardState extends State<Dashboard>
 
     store.addListener(_onStoreChanged);
     store.runVersion.addListener(_onRunFinished);
+    _lastAccount = auth.user?.username;
+    _lastAdmin = auth.user?.isAdmin;
     auth.addListener(_onAccountChanged);
-    submissions.addListener(_onAccountChanged);
+    submissions.changes.addListener(_reloadSites);
     HardwareKeyboard.instance.addHandler(_onKey);
 
     // Tạm dừng auto-refresh khi tab bị ẩn; quay lại thì check nếu đã quá hạn.
@@ -495,7 +522,7 @@ class _DashboardState extends State<Dashboard>
     store.removeListener(_onStoreChanged);
     store.runVersion.removeListener(_onRunFinished);
     auth.removeListener(_onAccountChanged);
-    submissions.removeListener(_onAccountChanged);
+    submissions.changes.removeListener(_reloadSites);
     store.dispose();
     shots.dispose();
     visits.dispose();
@@ -593,7 +620,8 @@ class _DashboardState extends State<Dashboard>
     final urls = _shotUrls;
 
     if (manual) {
-      shots.refreshAll(urls);
+      // POST /screenshot/refresh xong (BE đã quên "không có icon") → tải lại icon.
+      shots.refreshAll(urls).whenComplete(SiteIcon.forgetMissing);
     } else if (listChanged) {
       shots.fetchAll(urls);
     }
@@ -612,7 +640,11 @@ class _DashboardState extends State<Dashboard>
           x.type != y.type ||
           x.icon != y.icon ||
           x.iconUrl != y.iconUrl ||
-          x.departmentName != y.departmentName) {
+          x.departmentName != y.departmentName ||
+          x.isPrivate != y.isPrivate ||
+          x.owner != y.owner ||
+          x.ownerName != y.ownerName ||
+          x.previewImage != y.previewImage) {
         return false;
       }
     }
@@ -632,9 +664,29 @@ class _DashboardState extends State<Dashboard>
     }
   }
 
-  /// Card tự update tại chỗ; chỉ re-filter/sort (offline lên đầu) khi lượt check xong.
+  /// Card tự update tại chỗ (chấm online, độ trễ…). Chỉ dựng lại cả lưới khi
+  /// có site ĐỔI online ↔ offline (thứ tự offline-lên-đầu / bộ lọc thay đổi)
+  /// → check định kỳ 60s không làm lưới "reload" khi không có gì đổi.
+  String? _statusSig;
+
+  String _statusSignature() {
+    final b = StringBuffer();
+    for (final w in all) {
+      final s = _st(w);
+      b
+        ..write(w.id)
+        ..write(s.isOffline ? 'x' : (s.isReachable ? 'o' : '?'))
+        ..write(',');
+    }
+    return b.toString();
+  }
+
   void _onRunFinished() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final sig = _statusSignature();
+    if (sig == _statusSig) return;
+    _statusSig = sig;
+    setState(() {});
   }
 
   // ============================================================
@@ -815,16 +867,25 @@ class _DashboardState extends State<Dashboard>
   }
 
   // ------------------------------------------------------------
-  // THÊM WEBSITE / TÀI KHOẢN (UI mock — xem services/submission_store.dart)
+  // THÊM WEBSITE / TÀI KHOẢN (xem services/submission_store.dart)
   // ------------------------------------------------------------
 
   /// Phòng ban cho form: thứ tự chuẩn + phòng ban lạ có trong dữ liệu.
+  /// Trùng chỉ khác hoa/thường (PRO / Pro) → giữ 1, ưu tiên cách viết đang
+  /// được nhiều site dùng nhất (để site mới vào đúng nhóm trên lưới).
   List<String> get _formDepartments {
-    final names = {
-      ...kDeptColors.keys,
-      for (final w in _remote)
-        if (w.departmentName.trim().isNotEmpty) w.departmentName.trim(),
-    }.toList()
+    final used = <String, int>{};
+    for (final w in _remote) {
+      final d = w.departmentName.trim();
+      if (d.isNotEmpty) used[d] = (used[d] ?? 0) + 1;
+    }
+    final byKey = <String, String>{};
+    for (final d in [...kDeptColors.keys, ...used.keys]) {
+      final k = d.toLowerCase();
+      final cur = byKey[k];
+      if (cur == null || (used[d] ?? 0) > (used[cur] ?? 0)) byKey[k] = d;
+    }
+    final names = byKey.values.toList()
       ..sort((a, b) {
         final r = deptRank(a).compareTo(deptRank(b));
         return r != 0 ? r : a.compareTo(b);
@@ -851,6 +912,7 @@ class _DashboardState extends State<Dashboard>
 
   void _openMySites() {
     if (!auth.loggedIn) return;
+    submissions.load();
     showSidePanel(
       context,
       builder: (panel) => MySitesPanel(
@@ -868,6 +930,7 @@ class _DashboardState extends State<Dashboard>
 
   void _openReview() {
     if (!auth.isAdmin) return;
+    submissions.load();
     showSidePanel(context, width: 520, builder: (_) => const ReviewPanel());
   }
 
@@ -886,7 +949,7 @@ class _DashboardState extends State<Dashboard>
         ? 0.0
         : (_sidebarCollapsed ? Sidebar.railWidth : Sidebar.wideWidth);
     // + nút Thêm website & tài khoản (~290px) → ngưỡng cao hơn.
-    final inlineTools = width - sideW >= 1220;
+    final inlineTools = width - sideW >= 1110;
     // Vùng nội dung hẹp: Thêm website / Đăng nhập / Refresh chỉ còn icon.
     final compactActions = width - sideW < 1000;
 
@@ -960,7 +1023,6 @@ class _DashboardState extends State<Dashboard>
                 onRefresh: () => _refresh(manual: true),
                 showPreview: _showPreview,
                 onTogglePreview: _togglePreviewAll,
-                compactActions: !narrow && compactActions,
                 actions: narrow ? null : actions(compact: compactActions),
               ),
             ),
@@ -1557,14 +1619,11 @@ class _Header extends StatelessWidget {
   /// ở thanh trên cùng).
   final Widget? actions;
 
-  /// Refresh chỉ còn icon.
-  final bool compactActions;
 
   const _Header({
     required this.tourKeys,
     required this.onHelp,
     this.actions,
-    required this.compactActions,
     this.tools,
     required this.showPreview,
     required this.onTogglePreview,
@@ -1662,45 +1721,45 @@ class _Header extends StatelessWidget {
             ],
           ),
         ),
-        if (tools != null) ...[const SizedBox(width: 16), tools!],
-        const SizedBox(width: 10),
-        _HeaderIconButton(
-          key: tourKeys.help,
-          icon: LucideIcons.circleHelp,
-          tooltip: 'Hướng dẫn sử dụng (?)',
-          active: false,
-          onTap: onHelp,
-        ),
+        if (tools != null) ...[const SizedBox(width: 12), tools!],
         const SizedBox(width: 8),
-        _HeaderIconButton(
-          key: tourKeys.preview,
-          icon: showPreview ? LucideIcons.image : LucideIcons.imageOff,
-          tooltip: showPreview
-              ? 'Ẩn preview tất cả site'
-              : 'Hiện preview tất cả site',
-          active: showPreview,
-          onTap: onTogglePreview,
-        ),
-        const SizedBox(width: 8),
-        _ThemeToggle(key: tourKeys.theme),
-        const SizedBox(width: 8),
-        ValueListenableBuilder<bool>(
-          key: tourKeys.refresh,
-          valueListenable: coolingDown,
-          builder: (_, cooling, _) => _RefreshButton(
-            spin: spin,
-            running: running,
-            coolingDown: cooling,
-            compact: compactActions,
-            onTap: onRefresh,
-          ),
+        // Cụm icon "xem": hướng dẫn · preview · theme · refresh (1 viền chung).
+        _ToolGroup(
+          children: [
+            _GroupIcon(
+              key: tourKeys.help,
+              tooltip: 'Hướng dẫn sử dụng (?)',
+              onTap: onHelp,
+              child: const Icon(LucideIcons.circleHelp),
+            ),
+            _GroupIcon(
+              key: tourKeys.preview,
+              tooltip: showPreview
+                  ? 'Ẩn preview tất cả site'
+                  : 'Hiện preview tất cả site',
+              active: showPreview,
+              onTap: onTogglePreview,
+              child: Icon(showPreview ? LucideIcons.image : LucideIcons.imageOff),
+            ),
+            _ThemeToggle(key: tourKeys.theme),
+            ValueListenableBuilder<bool>(
+              key: tourKeys.refresh,
+              valueListenable: coolingDown,
+              builder: (_, cooling, _) => _RefreshButton(
+                spin: spin,
+                running: running,
+                coolingDown: cooling,
+                onTap: onRefresh,
+              ),
+            ),
+          ],
         ),
         if (actions != null) ...[
           // Vách ngăn mảnh: nhóm "xem" (trái) ↔ nhóm "hành động" (phải).
           Container(
             width: 1,
             height: 22,
-            margin: const EdgeInsets.symmetric(horizontal: 12),
+            margin: const EdgeInsets.symmetric(horizontal: 10),
             color: c.border,
           ),
           actions!,
@@ -1750,43 +1809,68 @@ class _UploadButton extends StatelessWidget {
   }
 }
 
-/// Nút icon 38px ở header (cùng kiểu nút theme). [active] = đang bật → nền
-/// xám nhạt + icon đậm; tắt → icon xám.
-class _HeaderIconButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final bool active;
-  final VoidCallback onTap;
+/// Cụm nút icon chung 1 viền (cao 38px, bằng ô search / bộ lọc).
+class _ToolGroup extends StatelessWidget {
+  final List<Widget> children;
+  const _ToolGroup({required this.children});
 
-  const _HeaderIconButton({
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c.border),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: children),
+    );
+  }
+}
+
+/// 1 nút icon trong [_ToolGroup] (32×32, không viền riêng).
+/// [active] = đang bật → nền xám nhạt + icon đậm. [onTap] null = disabled.
+class _GroupIcon extends StatelessWidget {
+  final Widget child;
+  final String tooltip;
+  final VoidCallback? onTap;
+  final bool active;
+  final Color? color;
+
+  const _GroupIcon({
     super.key,
-    required this.icon,
+    required this.child,
     required this.tooltip,
-    required this.active,
     required this.onTap,
+    this.active = false,
+    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = context.dash;
+    final fg = onTap == null ? c.faint : (color ?? (active ? c.text : c.muted));
     return Tooltip(
       message: tooltip,
-      child: HoverSurface(
-        onTap: onTap,
-        radius: 10,
-        color: active ? c.surface2 : c.surface,
-        hoverColor: c.surface2,
-        borderColor: c.border,
-        child: SizedBox(
-          width: 36,
-          height: 36,
-          child: AnimatedSwitcher(
-            duration: Motion.of(context, Motion.fast),
-            child: Icon(
-              icon,
-              key: ValueKey(icon),
-              size: 18,
-              color: active ? c.text : c.muted,
+      child: Material(
+        color: active ? c.surface2 : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          hoverColor: c.surface2,
+          child: SizedBox(
+            width: 32,
+            height: 32,
+            child: Center(
+              child: IconTheme.merge(
+                data: IconThemeData(size: 17, color: fg),
+                child: AnimatedSwitcher(
+                  duration: Motion.of(context, Motion.fast),
+                  child: child,
+                ),
+              ),
             ),
           ),
         ),
@@ -1795,7 +1879,7 @@ class _HeaderIconButton extends StatelessWidget {
   }
 }
 
-/// Nút đổi Light/Dark: cùng kích thước & viền với Refresh.
+/// Đổi Light/Dark.
 class _ThemeToggle extends StatelessWidget {
   const _ThemeToggle({super.key});
 
@@ -1803,120 +1887,54 @@ class _ThemeToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.dash;
     final dark = context.isDark;
-
-    return Tooltip(
-      message: dark ? 'Chuyển sang Light' : 'Chuyển sang Dark',
-      child: Material(
-        color: c.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: BorderSide(color: c.border),
-        ),
-        child: InkWell(
-          onTap: () {
-            final curtain = ThemeCurtain.of(context);
-            if (curtain != null) {
-              curtain.toggle();
-            } else {
-              ThemeController.toggle(Theme.of(context).brightness);
-            }
-          },
-          customBorder: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: SizedBox(
-            width: 38,
-            height: 38,
-            child: AnimatedSwitcher(
-              duration: Motion.of(context, const Duration(milliseconds: 300)),
-              transitionBuilder: (child, a) => RotationTransition(
-                turns: Tween(begin: .75, end: 1.0).animate(a),
-                child: FadeTransition(opacity: a, child: child),
-              ),
-              child: Icon(
-                dark ? LucideIcons.moon : LucideIcons.sun,
-                key: ValueKey(dark),
-                size: 18,
-                color: dark ? Brand.yellow : c.text,
-              ),
-            ),
-          ),
-        ),
+    return _GroupIcon(
+      tooltip: dark ? 'Chuyển sang Light' : 'Chuyển sang Dark',
+      color: dark ? Brand.yellow : c.text,
+      onTap: () {
+        final curtain = ThemeCurtain.of(context);
+        if (curtain != null) {
+          curtain.toggle();
+        } else {
+          ThemeController.toggle(Theme.of(context).brightness);
+        }
+      },
+      child: Icon(
+        dark ? LucideIcons.moon : LucideIcons.sun,
+        key: ValueKey(dark),
       ),
     );
   }
 }
 
+/// Refresh: chụp lại ảnh + kiểm tra lại mọi site. Chỉ icon; đang chạy thì xoay.
 class _RefreshButton extends StatelessWidget {
   final Animation<double> spin;
   final bool running;
   final bool coolingDown;
   final VoidCallback onTap;
 
-  /// Màn hẹp: chỉ còn icon (38×38).
-  final bool compact;
-
   const _RefreshButton({
     required this.spin,
     required this.running,
     required this.coolingDown,
     required this.onTap,
-    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final c = context.dash;
     final disabled = running || coolingDown;
-    final tip = coolingDown && !running
-        ? 'Just refreshed — wait a few seconds'
-        : 'Re-capture screenshots & re-check all sites';
-
-    if (compact) {
-      return Tooltip(
-        message: tip,
-        child: OutlinedButton(
-          onPressed: disabled ? null : onTap,
-          style: OutlinedButton.styleFrom(
-            backgroundColor: c.surface,
-            foregroundColor: c.text,
-            disabledForegroundColor: c.muted,
-            side: BorderSide(color: c.border),
-            fixedSize: const Size(38, 38),
-            minimumSize: const Size(38, 38),
-            padding: EdgeInsets.zero,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-          child: RotationTransition(
-            turns: spin,
-            child: const Icon(LucideIcons.refreshCw, size: 17),
-          ),
-        ),
-      );
-    }
-
-    return Tooltip(
-      message: tip,
-      child: OutlinedButton.icon(
-        onPressed: disabled ? null : onTap,
-        style: OutlinedButton.styleFrom(
-          backgroundColor: c.surface,
-          foregroundColor: c.text,
-          disabledForegroundColor: c.muted,
-          side: BorderSide(color: c.border),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-        icon: RotationTransition(
-          turns: spin,
-          child: const Icon(LucideIcons.refreshCw, size: 17),
-        ),
-        label: Text(running ? 'Checking…' : 'Refresh'),
+    final tip = running
+        ? 'Đang kiểm tra…'
+        : coolingDown
+        ? 'Vừa làm mới — đợi vài giây'
+        : 'Refresh: chụp lại ảnh & kiểm tra lại tất cả site';
+    return _GroupIcon(
+      tooltip: tip,
+      color: context.dash.text,
+      onTap: disabled ? null : onTap,
+      child: RotationTransition(
+        turns: spin,
+        child: const Icon(LucideIcons.refreshCw),
       ),
     );
   }

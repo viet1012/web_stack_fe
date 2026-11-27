@@ -1,3 +1,5 @@
+import '../services/website_service.dart' show resolveApiUrl;
+
 class Website {
   final int id;
   final String name;
@@ -20,8 +22,11 @@ class Website {
   /// Site do người dùng thêm, chế độ Private: chỉ người thêm + admin thấy.
   final bool isPrivate;
 
-  /// Username người thêm site (null = site hệ thống do IT cấu hình).
+  /// Mã NV người thêm site (null = site hệ thống do IT cấu hình).
   final String? owner;
+
+  /// Tên người thêm (hiển thị).
+  final String? ownerName;
 
   /// Ảnh xem trước người dùng tự tải lên (URL hoặc data URL). null → dùng
   /// ảnh chụp tự động (/api/screenshot) như bình thường.
@@ -39,6 +44,7 @@ class Website {
     this.certWarning = false,
     this.isPrivate = false,
     this.owner,
+    this.ownerName,
     this.previewImage,
   });
 
@@ -55,7 +61,8 @@ class Website {
       certWarning: json['certWarning'] == true,
       isPrivate: json['visibility'] == 'private',
       owner: json['owner'] as String?,
-      previewImage: json['previewUrl'] as String?,
+      ownerName: json['ownerName'] as String?,
+      previewImage: resolveApiUrl(json['previewUrl'] as String?),
     );
   }
 }

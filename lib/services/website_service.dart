@@ -32,11 +32,53 @@ class StatusResult {
   });
 }
 
+/// Đường dẫn tương đối của BE ("/api/uploads/…") → URL tuyệt đối.
+String? resolveApiUrl(String? path) {
+  if (path == null || path.isEmpty) return null;
+  if (path.startsWith('/')) return '${WebsiteService.dio.options.baseUrl}$path';
+  return path;
+}
+
+/// Lỗi BE dạng { code, message } → message tiếng Việt để hiện cho người dùng.
+String apiErrorMessage(Object e, [String fallback = 'Có lỗi xảy ra, vui lòng thử lại']) {
+  if (e is DioException) {
+    final d = e.response?.data;
+    if (d is Map && d['message'] is String) return d['message'] as String;
+    switch (e.response?.statusCode) {
+      case 401:
+        return 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại';
+      case 403:
+        return 'Bạn không có quyền thực hiện thao tác này';
+      case 404:
+        return 'Không tìm thấy website (có thể đã bị xoá)';
+    }
+    if (e.response == null) return 'Không kết nối được máy chủ';
+  }
+  return fallback;
+}
+
+/// Địa chỉ BE server (dev_manager_be chạy trên 192.168.122.16).
+const kServerApi = 'http://192.168.122.16:9095';
+
+/// Địa chỉ BE khi chạy BE ở máy dev.
+const kLocalApi = 'http://localhost:9999';
+
+/// Chọn BE tự động — KHÔNG cần sửa code khi đổi dev ↔ server:
+/// 1. `--dart-define=API_BASE=...` (vd. chạy FE ở máy dev nhưng dùng BE server).
+/// 2. Trang mở ở localhost / 127.0.0.1 → BE ở máy dev ([kLocalApi]).
+/// 3. Còn lại (mở từ server / máy khác) → BE server ([kServerApi]).
+String resolveApiBase() {
+  const override = String.fromEnvironment('API_BASE');
+  if (override.isNotEmpty) return override;
+  final host = Uri.base.host;
+  final local = host == 'localhost' || host == '127.0.0.1' || host.isEmpty;
+  return local ? kLocalApi : kServerApi;
+}
+
 class WebsiteService {
   static final Dio dio = Dio(
     BaseOptions(
-      // baseUrl: 'http://localhost:9999',
-      baseUrl: 'http://192.168.122.16:9095',
+      baseUrl: resolveApiBase(),
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 10),
       headers: {'Content-Type': 'application/json'},
@@ -45,6 +87,7 @@ class WebsiteService {
 
   // init interceptor (log request/response)
   static void init() {
+    debugPrint('[API] ${dio.options.baseUrl}');
     if (kDebugMode) {
       dio.interceptors.add(
         LogInterceptor(requestBody: true, responseBody: true),
@@ -179,6 +222,22 @@ class WebsiteService {
         'url=${Uri.encodeQueryComponent(url)}'
         '${t == null ? '' : '&t=${Uri.encodeQueryComponent('$t')}'}';
     return '${dio.options.baseUrl}$_screenshotPath?$q';
+  }
+
+  // PAGE TITLE: BE đọc <title>/og:title của trang. 200 {title} | 204 không có.
+  // Lỗi/timeout → null (chỉ là gợi ý, không chặn form).
+  static Future<String?> fetchPageTitle(String url) async {
+    try {
+      final res = await dio.get(
+        '/api/websites/page-title',
+        queryParameters: {'url': url},
+        options: Options(receiveTimeout: const Duration(seconds: 12)),
+      );
+      final t = res.data is Map ? res.data['title'] : null;
+      return t is String && t.trim().isNotEmpty ? t.trim() : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   // FAVICON: 200 = ảnh, 204 = không có. Cùng baseUrl với các API khác.

@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../models/submission.dart';
 import '../services/auth_store.dart';
 import '../services/submission_store.dart';
+import '../services/website_service.dart' show apiErrorMessage;
 import '../theme/dash_theme.dart';
 import 'dash_ui.dart' show breakableHost, openInNewTab;
 import 'form_ui.dart';
@@ -33,22 +34,40 @@ class _MySitesPanelState extends State<MySitesPanel> {
     _Tab.rejected => s.isRejected,
   };
 
-  void _remove(Submission s) {
-    final old = submissions.remove(s.id);
-    if (old == null) return;
+  void _snack(String text, {VoidCallback? undo}) {
     final m = ScaffoldMessenger.of(context);
     m.hideCurrentSnackBar();
     m.showSnackBar(
       SnackBar(
-        content: Text(
-          s.isPending ? 'Đã rút lại “${s.name}”' : 'Đã gỡ “${s.name}”',
-        ),
-        action: SnackBarAction(
-          label: 'Hoàn tác',
-          textColor: context.dash.onInk,
-          onPressed: () => submissions.restore(old),
-        ),
+        content: Text(text),
+        action: undo == null
+            ? null
+            : SnackBarAction(
+                label: 'Hoàn tác',
+                textColor: context.dash.onInk,
+                onPressed: undo,
+              ),
       ),
+    );
+  }
+
+  Future<void> _remove(Submission s) async {
+    try {
+      await submissions.remove(s.id);
+    } catch (e) {
+      if (mounted) _snack(apiErrorMessage(e, 'Không xoá được'));
+      return;
+    }
+    if (!mounted) return;
+    _snack(
+      s.isPending ? 'Đã rút lại “${s.name}”' : 'Đã gỡ “${s.name}”',
+      undo: () async {
+        try {
+          await submissions.restore(s.id);
+        } catch (e) {
+          if (mounted) _snack(apiErrorMessage(e, 'Không hoàn tác được'));
+        }
+      },
     );
   }
 
@@ -222,7 +241,7 @@ class _MyItem extends StatelessWidget {
                   s.reviewedAt != null && !s.isPending
                       ? '${s.isRejected ? 'Từ chối' : 'Duyệt'} '
                             '${timeAgoVi(s.reviewedAt!)}'
-                      : 'Thêm ${timeAgoVi(s.createdAt)}',
+                      : 'Thêm ${timeAgoVi(s.submittedAt)}',
                   style: TextStyle(color: c.faint, fontSize: 12),
                 ),
               ],

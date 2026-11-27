@@ -1,6 +1,16 @@
 # Prompt cho Backend — Đăng nhập · Thêm website · Duyệt website
 
 > Copy toàn bộ phần dưới đường kẻ và dán cho dev BE / AI agent đang làm repo backend.
+>
+> **Trạng thái (2026-11-27): đã làm trong dev_manager_be.** Khác contract dưới đây:
+> - **Auth**: KHÔNG làm bảng user / login riêng. Login = backlog-be (`/api/production-control/auth/login`),
+>   dev_manager_be chỉ kiểm token trên `F2_ProductionControl_Session` + quyền app `ITPRO` (admin = IT).
+>   Chỉ có `GET /api/auth/me`.
+> - **Admin (IT) thêm site Public → `live` ngay**, không cần duyệt.
+> - **Ảnh**: không có `/api/uploads/preview` (POST); FE gửi `previewImage` (data URL) trong body submission,
+>   giữ ảnh cũ bằng `previewUrl`. Chỉ có `GET /api/uploads/preview/{file}`. `previewUrl` là đường dẫn tương đối.
+> - **Hoàn tác**: `POST /{id}/restore` = huỷ xoá (xoá mềm); `POST /{id}/reopen` (IT) = huỷ duyệt / từ chối.
+> - Site người dùng nằm chung bảng `F2_websites` (cột mới: `src/main/resources/sql/itpro_website_submission.sql`).
 
 ---
 

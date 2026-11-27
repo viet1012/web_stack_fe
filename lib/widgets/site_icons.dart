@@ -18,6 +18,14 @@ class SiteIcon extends StatefulWidget {
 
   const SiteIcon({super.key, required this.website, this.size = 52});
 
+  /// Tăng khi bấm Refresh → quên các icon "không có" + tải lại (cache-bust).
+  static final retry = ValueNotifier<int>(0);
+
+  static void forgetMissing() {
+    _SiteIconState._missing.clear();
+    retry.value++;
+  }
+
   @override
   State<SiteIcon> createState() => _SiteIconState();
 }
@@ -27,7 +35,27 @@ class _SiteIconState extends State<SiteIcon> {
   /// không request lại khi card rebuild / remount (ImageCache không giữ lỗi).
   static final Set<String> _missing = {};
 
-  String get _src => WebsiteService.faviconUrl(widget.website.id);
+  String get _src {
+    final u = WebsiteService.faviconUrl(widget.website.id);
+    final v = SiteIcon.retry.value;
+    return v == 0 ? u : '$u?r=$v';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    SiteIcon.retry.addListener(_onRetry);
+  }
+
+  @override
+  void dispose() {
+    SiteIcon.retry.removeListener(_onRetry);
+    super.dispose();
+  }
+
+  void _onRetry() {
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -48,7 +76,7 @@ class _SiteIconState extends State<SiteIcon> {
         color: c.surface2,
         borderRadius: BorderRadius.circular(size / 4),
       ),
-      // id âm = site người dùng thêm (mock, chưa có trên BE) → không gọi API.
+      // id âm = không có trên BE → không gọi API.
       child: w.id < 0 || _missing.contains(src)
           ? glyph
           : Image.network(
@@ -59,10 +87,11 @@ class _SiteIconState extends State<SiteIcon> {
               fit: BoxFit.contain, // object-fit: contain
               filterQuality: FilterQuality.medium,
               gaplessPlayback: true,
-              // Không dùng <img> platform view (rất nặng khi có nhiều icon,
-              // gây giật khi đổi phòng ban). BE đã bật CORS cho /api/* →
-              // tải qua canvas; lỗi CORS → errorBuilder → glyph.
-              webHtmlElementStrategy: WebHtmlElementStrategy.never,
+              // Mặc định tải + vẽ qua canvas (nhẹ). Chỉ khi canvas KHÔNG
+              // giải mã được (favicon SVG) mới dùng thẻ <img> của trình
+              // duyệt — trình duyệt vẽ được SVG. Ít site dùng SVG-only nên
+              // số platform view vẫn nhỏ.
+              webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
               // Chưa có frame → glyph (không nháy ô trống).
               frameBuilder: (_, child, frame, sync) =>
                   frame != null || sync ? child : glyph,

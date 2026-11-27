@@ -117,8 +117,8 @@ lib/
 │   ├── status_store.dart         # Trạng thái từng site (ValueNotifier theo URL), lastSeen
 │   ├── screenshot_store.dart     # Meta/ảnh chụp
 │   ├── visit_store.dart          # Đếm lượt mở site
-│   ├── auth_store.dart           # Đăng nhập (MOCK)
-│   └── submission_store.dart     # Thêm / duyệt website (MOCK)
+│   ├── auth_store.dart           # Đăng nhập (token backlog-be)
+│   └── submission_store.dart     # Thêm / duyệt website (/api/submissions)
 ├── theme/
 │   └── dash_theme.dart           # Token màu Light/Dark, StatusTone, màu phòng ban, font, Motion, ThemeController
 ├── screens/
@@ -164,32 +164,40 @@ File cũ không còn được import ở đâu (có thể xoá): `screens/port_s
 - Mỗi ô **chính là `WebsiteCard`** (giống hệt card trong lưới). Không đủ chỗ → cuộn ngang.
 - **Kéo thả để đổi thứ tự** (`_FavSlot`: `Draggable` + `DragTarget`): nhấn giữ card → kéo → thả lên ô khác. Kéo sang trái = chèn trước, sang phải = chèn sau. Thứ tự lưu ở `itpro.favOrder`.
 
-### Thêm website · Đăng nhập · Duyệt (UI — dữ liệu MOCK, chưa nối BE)
+### Thêm website · Đăng nhập · Duyệt
+- **Đăng nhập** = mã NV + mật khẩu (bảng `HSE_Patrol_Account`). FE gọi `POST /api/auth/login` của dev_manager_be; BE kiểm mật khẩu, tạo session trong `F2_ProductionControl_Session` (DB `F2Database`, BE kết nối KVH → truy vấn chéo DB, đổi bằng `app.auth-db`) → trả token + user. Vai trò lấy từ quyền app `ITPRO`: **admin = IT** (K Common / PE IT), còn lại = người dùng.
+- **Địa chỉ BE tự chọn** (`resolveApiBase()` trong [`website_service.dart`](lib/services/website_service.dart)) — không cần sửa code khi đổi dev ↔ server:
+
+  | Mở dashboard ở | BE dùng |
+  |---|---|
+  | `localhost` / `127.0.0.1` (flutter run) | `http://localhost:9999` (BE máy dev) |
+  | địa chỉ khác (server 192.168.122.16, …) | `http://192.168.122.16:9095` |
+  | có `--dart-define=API_BASE=…` | địa chỉ đó (vd. chạy FE ở máy dev nhưng dùng BE server) |
+
+  VS Code: chọn cấu hình chạy *FE · BE local* hoặc *FE · BE server* trong [`.vscode/launch.json`](.vscode/launch.json).
 - **Nút `+ Thêm website`** (nút đặc duy nhất ở header; màn < 900px nằm ở thanh trên cạnh logo). Chưa đăng nhập → mở dialog đăng nhập trước.
-- **Form** ([`upload_dialog.dart`](lib/widgets/upload_dialog.dart)): URL (tự thêm `http://`, bỏ `/` cuối, báo trùng với site đã có) → Tên (tự gợi ý từ host) + Phòng ban (dropdown, chung 1 hàng) → **Ảnh xem trước** (tuỳ chọn, PNG/JPG/WebP ≤ 5 MB, tự thu nhỏ còn cạnh dài 1280px; **bỏ trống → tự chụp màn hình như site thường**) → **Ai có thể xem?**
+- **Form** ([`upload_dialog.dart`](lib/widgets/upload_dialog.dart)): URL (tự thêm `http://`, bỏ `/` cuối, báo trùng) → Tên (tự gợi ý từ title trang) + Phòng ban → **Ảnh xem trước** (tuỳ chọn, PNG/JPG/WebP, không giới hạn dung lượng — tự thu nhỏ còn 1280px rồi gửi lên BE; **bỏ trống → tự chụp màn hình**) → **Ai có thể xem?**
 
-  | | Ai xem | Duyệt | Hiện trên lưới |
+  | | Ai xem | Người thường thêm | IT thêm |
   |---|---|---|---|
-  | **Public** | Mọi người, không cần đăng nhập | **Cần admin phê duyệt** | Sau khi duyệt |
-  | **Private** | Chỉ người thêm + admin (phải đăng nhập) | Không cần | Ngay, có icon 🔒 cạnh tên |
+  | **Public** | Mọi người, không cần đăng nhập | **Chờ IT duyệt** | Hiện ngay |
+  | **Private** | Chỉ người thêm + IT (phải đăng nhập) | Hiện ngay, có 🔒 | Hiện ngay |
 
-  Public có thêm ô *Ghi chú cho admin* (tuỳ chọn). Gửi xong → màn xác nhận (Public có thanh tiến trình *Đã gửi → Admin duyệt → Hiện công khai*).
-- **Avatar** (góc phải): menu *Website của tôi* · *Duyệt website* (admin) · *Đăng xuất*. Chấm vàng = có site chờ duyệt (admin), chấm đỏ = site của bạn bị từ chối.
-- **Website của tôi** (panel phải, [`my_sites_panel.dart`](lib/widgets/my_sites_panel.dart)): lọc Tất cả / Chờ duyệt / Đang hiển thị / Bị từ chối; bị từ chối hiện lý do + nút *Sửa & gửi lại*; rút lại / gỡ có *Hoàn tác*.
-- **Duyệt website** (admin, [`review_panel.dart`](lib/widgets/review_panel.dart)): hàng chờ (cũ nhất trước), bấm URL để mở thử; *Phê duyệt* / *Từ chối* (bắt buộc lý do, có lý do gợi ý); tab *Đã xử lý*; mọi thao tác có *Hoàn tác*.
-- **Mock:** [`auth_store.dart`](lib/services/auth_store.dart) — đăng nhập `admin` = quyền admin, tên khác = người dùng; mật khẩu bất kỳ ≥ 4 ký tự. [`submission_store.dart`](lib/services/submission_store.dart) — có sẵn 4 site mẫu, lưu localStorage. Site người dùng thêm có **id âm** (không gọi favicon từ BE). Ảnh tự tải lên lưu dạng data URL trong localStorage (giới hạn ~5 MB/trình duyệt — vượt thì không lưu được); khi có BE: upload multipart, lưu URL vào field `previewUrl` của site.
-- **Khi nối BE**, thay các hàm mock bằng API (đề xuất):
+  Người thường sửa site Public / đổi sang Public → quay về chờ duyệt. Lỗi từ BE (trùng URL, hết phiên…) hiện ngay trong form.
+- **Avatar** (góc phải): menu *Website của tôi* · *Duyệt website* (IT) · *Đăng xuất*. Chấm vàng = có site chờ duyệt (IT), chấm đỏ = site của bạn bị từ chối.
+- **Website của tôi** ([`my_sites_panel.dart`](lib/widgets/my_sites_panel.dart)): lọc Tất cả / Chờ duyệt / Đang hiển thị / Bị từ chối; bị từ chối hiện lý do + *Sửa & gửi lại*; rút lại / gỡ = xoá mềm, có *Hoàn tác* (`POST /restore`).
+- **Duyệt website** (IT, [`review_panel.dart`](lib/widgets/review_panel.dart)): hàng chờ (gửi sớm nhất trước); *Phê duyệt* / *Từ chối* (bắt buộc lý do); tab *Đã xử lý*; *Hoàn tác* = đưa về hàng chờ (`POST /reopen`).
+- **API** (dev_manager_be, cần `Authorization: Bearer <token>`; quyền kiểm ở BE):
 
   | Method | Path | Dùng cho |
   |---|---|---|
-  | POST | `/api/auth/login` · `/api/auth/logout` · GET `/api/auth/me` | Đăng nhập (token/cookie), lấy user + role |
-  | GET | `/api/websites` | Trả thêm site người dùng mà user **được xem** (lọc ở BE), kèm `visibility`, `owner` |
-  | GET · POST | `/api/submissions/mine` · `/api/submissions` | Danh sách của tôi · gửi mới `{name,url,department,visibility,note}` |
-  | PUT · DELETE | `/api/submissions/{id}` | Sửa & gửi lại · rút lại / gỡ |
-  | GET | `/api/submissions?status=pending` | Hàng chờ (admin) |
-  | POST | `/api/submissions/{id}/approve` · `/reject` `{reason}` | Duyệt / từ chối (admin) |
-
-  ⚠ Quyền Private/admin **phải kiểm tra ở BE** — FE chỉ ẩn/hiện giao diện.
+  | GET | `/api/auth/me` | User + `role: admin\|user` |
+  | GET | `/api/websites` · `/status` | Token tuỳ chọn: BE tự lọc site Private theo người xem |
+  | GET | `/api/submissions/mine` | Site của tôi |
+  | POST · PUT · DELETE | `/api/submissions` · `/{id}` | Thêm `{name,url,department,visibility,note,previewImage?,previewUrl?}` · sửa · xoá mềm |
+  | POST | `/api/submissions/{id}/restore` | Hoàn tác xoá |
+  | GET | `/api/submissions?status=pending\|reviewed` | Hàng chờ / đã xử lý (IT) |
+  | POST | `/api/submissions/{id}/approve` · `/reject {reason}` · `/reopen` | Duyệt / từ chối / hoàn tác (IT) |
 
 ### Lưới card (nhóm theo phòng ban)
 - Mỗi phòng ban là **một khung**: không màu, chỉ **viền đen (Light) / trắng (Dark)**, bo 16px.
@@ -312,8 +320,7 @@ Thêm icon: sửa `kSiteIcons` (và `_byName` nếu muốn tự đoán) trong [`
 | `itpro.showPreview` | `'1'` / `'0'` — hiện/ẩn preview mọi card (mặc định hiện) |
 | `itpro.favOrder` | `[siteId, …]` — thứ tự kéo thả của Favorites |
 | `itpro.starred` | `[siteId, …]` — site gắn sao (hiện ở Favorites, không hết hạn) |
-| `itpro.mockUser` | User đăng nhập **mock** (username + role, **không** lưu mật khẩu) |
-| `itpro.mockSubmissions` | Site người dùng thêm (**mock**). Xoá key này để về dữ liệu mẫu |
+| `itpro.auth` | Token đăng nhập + tên / vai trò hiển thị (**không** lưu mật khẩu). Vai trò được xác nhận lại qua `/api/auth/me` mỗi lần mở trang |
 | `flutter.dash.themeMode` | `light` / `dark` (không có = theo hệ điều hành) |
 | `flutter.dash.lastSeen.v2` | Lần cuối mỗi site online |
 

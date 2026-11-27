@@ -1,61 +1,87 @@
-import 'dart:convert';
-import 'dart:html' as html;
-
 import 'package:flutter/foundation.dart';
 
 import '../models/submission.dart';
-import '../models/website.dart';
 import 'auth_store.dart';
+import 'website_service.dart';
 
-/// WEBSITE DO NGƯỜI DÙNG THÊM — **MOCK** (chưa nối backend).
+/// WEBSITE DO NGƯỜI DÙNG THÊM — gọi /api/submissions (dev_manager_be).
 ///
-/// Lưu ở localStorage (`itpro.mockSubmissions`) để F5 không mất dữ liệu thử.
-/// Khi có BE, thay từng hàm bằng API tương ứng (xem README mục "Thêm website").
+/// Giữ bản sao trong bộ nhớ: [mine] (của tôi), [pending] / [reviewed] (admin).
+/// Tự tải lại khi đăng nhập / đăng xuất. Mọi kiểm tra quyền làm ở BE.
+/// Hàm ghi ném [DioException] khi lỗi → dùng [apiErrorMessage] để hiện lỗi.
 class SubmissionStore extends ChangeNotifier {
   SubmissionStore._() {
-    _load();
+    auth.addListener(_onAuth);
+    if (auth.loggedIn) load();
   }
 
   static final instance = SubmissionStore._();
 
-  static const _key = 'itpro.mockSubmissions';
+  static final _dio = WebsiteService.dio;
+  static const _base = '/api/submissions';
 
-  final List<Submission> _items = [];
-  int _nextId = -1;
+  List<Submission> _mine = [];
+  List<Submission> _pending = [];
+  List<Submission> _reviewed = [];
 
-  List<Submission> get items => List.unmodifiable(_items);
+  /// Mỗi lần thêm / sửa / duyệt / xoá thành công → tăng. Dashboard nghe để
+  /// tải lại danh sách site.
+  final changes = ValueNotifier<int>(0);
 
-  /// Site hiện trên lưới cho [user]:
-  /// Public đã duyệt (ai cũng thấy) + Private của chính mình (admin thấy hết).
-  List<Website> visibleFor(AppUser? user) => [
-    for (final s in _items)
-      if (s.isLive &&
-          (!s.isPrivate ||
-              (user != null && (user.isAdmin || s.owner == user.username))))
-        s.toWebsite(),
-  ];
+  /// Đăng nhập / đăng xuất / BE xác nhận lại vai trò → tải lại.
+  void _onAuth() {
+    if (auth.user == null) {
+      _mine = [];
+      _pending = [];
+      _reviewed = [];
+      notifyListeners();
+    } else {
+      load();
+    }
+  }
 
-  /// Mới nhất lên đầu.
-  List<Submission> mine(AppUser user) =>
-      _items.where((s) => s.owner == user.username).toList()
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  // ------------------------------------------------------------
+  // READ
+  // ------------------------------------------------------------
 
-  /// Hàng chờ duyệt cho admin — cũ nhất lên đầu (xử lý theo thứ tự gửi).
-  List<Submission> get pending =>
-      _items.where((s) => s.isPending).toList()
-        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  /// Mới gửi nhất lên đầu.
+  List<Submission> mine(AppUser user) => List.unmodifiable(_mine);
 
-  /// Đã xử lý (public đã duyệt / bị từ chối) — mới xử lý lên đầu.
-  List<Submission> get reviewed =>
-      _items.where((s) => !s.isPending && s.reviewedAt != null).toList()
-        ..sort((a, b) => b.reviewedAt!.compareTo(a.reviewedAt!));
+  /// Hàng chờ duyệt cho admin — gửi sớm nhất lên đầu.
+  List<Submission> get pending => List.unmodifiable(_pending);
 
+  /// Đã xử lý — mới xử lý lên đầu.
+  List<Submission> get reviewed => List.unmodifiable(_reviewed);
+
+  /// Site của tôi có cùng URL (để báo trùng ngay trên form).
   Submission? byUrl(String url) {
     final k = _norm(url);
-    for (final s in _items) {
+    for (final s in [..._mine, ..._pending]) {
       if (_norm(s.url) == k && !s.isRejected) return s;
     }
     return null;
+  }
+
+  Future<void> load() async {
+    if (!auth.loggedIn) return;
+    try {
+      final res = await _dio.get('$_base/mine');
+      _mine = _list(res.data);
+      if (auth.isAdmin) {
+        final r = await Future.wait([
+          _dio.get(_base, queryParameters: {'status': 'pending'}),
+          _dio.get(_base, queryParameters: {'status': 'reviewed'}),
+        ]);
+        _pending = _list(r[0].data);
+        _reviewed = _list(r[1].data);
+      } else {
+        _pending = [];
+        _reviewed = [];
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[SUBMISSIONS LOAD ERROR] $e');
+    }
   }
 
   // ------------------------------------------------------------
@@ -63,7 +89,6 @@ class SubmissionStore extends ChangeNotifier {
   // ------------------------------------------------------------
 
   Future<Submission> submit({
-    required AppUser owner,
     required String name,
     required String url,
     required String department,
@@ -71,29 +96,14 @@ class SubmissionStore extends ChangeNotifier {
     String note = '',
     String? previewImage,
   }) async {
-    await Future.delayed(const Duration(milliseconds: 700));
-    final s = Submission(
-      id: _nextId--,
-      name: name,
-      url: url,
-      department: department,
-      note: note,
-      previewImage: previewImage,
-      visibility: visibility,
-      // Private không cần duyệt → hiện ngay.
-      status: visibility == SiteVisibility.private
-          ? ReviewStatus.live
-          : ReviewStatus.pending,
-      owner: owner.username,
-      createdAt: DateTime.now(),
+    final res = await _dio.post(
+      _base,
+      data: _body(name, url, department, visibility, note, previewImage),
     );
-    _items.add(s);
-    _changed();
-    return s;
+    return _done(Submission.fromJson(Map<String, dynamic>.from(res.data)));
   }
 
-  /// Sửa site (vd. sửa site bị từ chối rồi gửi lại). Đổi sang Public hoặc
-  /// sửa site Public → quay về chờ duyệt.
+  /// Sửa site. Người thường sửa site Public / đổi sang Public → chờ duyệt lại.
   Future<Submission> update(
     int id, {
     required String name,
@@ -103,186 +113,81 @@ class SubmissionStore extends ChangeNotifier {
     String note = '',
     String? previewImage,
   }) async {
-    await Future.delayed(const Duration(milliseconds: 700));
-    final i = _items.indexWhere((s) => s.id == id);
-    final s = _items[i].copyWith(
-      name: name,
-      url: url,
-      department: department,
-      note: note,
-      previewImage: (previewImage,),
-      visibility: visibility,
-      status: visibility == SiteVisibility.private
-          ? ReviewStatus.live
-          : ReviewStatus.pending,
-      createdAt: DateTime.now(),
-      clearReview: true,
+    final res = await _dio.put(
+      '$_base/$id',
+      data: _body(name, url, department, visibility, note, previewImage),
     );
-    _items[i] = s;
-    _changed();
+    return _done(Submission.fromJson(Map<String, dynamic>.from(res.data)));
+  }
+
+  Future<Submission> approve(int id) => _post('$_base/$id/approve');
+
+  Future<Submission> reject(int id, String reason) =>
+      _post('$_base/$id/reject', {'reason': reason});
+
+  /// Hoàn tác duyệt / từ chối → về lại hàng chờ (admin).
+  Future<Submission> reopen(int id) => _post('$_base/$id/reopen');
+
+  /// Xoá (rút lại site đang chờ / gỡ site). Hoàn tác bằng [restore].
+  Future<void> remove(int id) async {
+    await _dio.delete('$_base/$id');
+    await _reloadAfterChange();
+  }
+
+  /// Hoàn tác xoá.
+  Future<Submission> restore(int id) => _post('$_base/$id/restore');
+
+  // ------------------------------------------------------------
+  // internal
+  // ------------------------------------------------------------
+
+  Future<Submission> _post(String path, [Object? data]) async {
+    final res = await _dio.post(path, data: data);
+    return _done(Submission.fromJson(Map<String, dynamic>.from(res.data)));
+  }
+
+  Future<Submission> _done(Submission s) async {
+    await _reloadAfterChange();
     return s;
   }
 
-  void approve(int id, AppUser by) => _set(
-    id,
-    (s) => s.copyWith(
-      status: ReviewStatus.live,
-      reviewedAt: DateTime.now(),
-      reviewedBy: by.username,
-    ),
-  );
-
-  void reject(int id, AppUser by, String reason) => _set(
-    id,
-    (s) => s.copyWith(
-      status: ReviewStatus.rejected,
-      reviewedAt: DateTime.now(),
-      reviewedBy: by.username,
-      rejectReason: reason,
-    ),
-  );
-
-  /// Xoá (rút lại site đang chờ / gỡ site của mình). Trả về bản đã xoá để
-  /// hoàn tác.
-  Submission? remove(int id) {
-    final i = _items.indexWhere((s) => s.id == id);
-    if (i < 0) return null;
-    final s = _items.removeAt(i);
-    _changed();
-    return s;
+  Future<void> _reloadAfterChange() async {
+    changes.value++;
+    await load();
   }
 
-  /// Hoàn tác: đặt lại đúng bản cũ (sau khi xoá / duyệt / từ chối).
-  void restore(Submission old) {
-    final i = _items.indexWhere((s) => s.id == old.id);
-    if (i < 0) {
-      _items.add(old);
-    } else {
-      _items[i] = old;
-    }
-    _changed();
+  static Map<String, dynamic> _body(
+    String name,
+    String url,
+    String department,
+    SiteVisibility visibility,
+    String note,
+    String? image,
+  ) {
+    final isNew = image != null && image.startsWith('data:');
+    return {
+      'name': name,
+      'url': url,
+      'department': department,
+      'visibility': visibility.name,
+      'note': note,
+      // Ảnh mới: gửi data URL. Giữ ảnh cũ: gửi lại đường dẫn tương đối.
+      'previewImage': isNew ? image : null,
+      'previewUrl': isNew ? null : _relative(image),
+    };
   }
 
-  void _set(int id, Submission Function(Submission) f) {
-    final i = _items.indexWhere((s) => s.id == id);
-    if (i < 0) return;
-    _items[i] = f(_items[i]);
-    _changed();
+  static String? _relative(String? url) {
+    if (url == null) return null;
+    final base = WebsiteService.dio.options.baseUrl;
+    return url.startsWith(base) ? url.substring(base.length) : url;
   }
 
-  // ------------------------------------------------------------
-  // PERSIST (mock)
-  // ------------------------------------------------------------
-
-  void _changed() {
-    notifyListeners();
-    try {
-      html.window.localStorage[_key] = jsonEncode(_items.map(_toJson).toList());
-    } catch (_) {}
-  }
-
-  void _load() {
-    try {
-      final raw = html.window.localStorage[_key];
-      if (raw != null && raw.isNotEmpty) {
-        for (final j in jsonDecode(raw) as List) {
-          _items.add(_fromJson(Map<String, dynamic>.from(j)));
-        }
-      }
-    } catch (_) {
-      _items.clear();
-    }
-    if (_items.isEmpty) _seed();
-    for (final s in _items) {
-      if (s.id <= _nextId) _nextId = s.id - 1;
-    }
-  }
-
-  void _seed() {
-    final now = DateTime.now();
-    _items.addAll([
-      Submission(
-        id: -1,
-        name: 'Quản lý khuôn',
-        url: 'http://192.168.122.40:8080',
-        department: 'PRO',
-        note: 'Theo dõi lịch bảo trì & tuổi thọ khuôn cho tổ sản xuất.',
-        visibility: SiteVisibility.public,
-        status: ReviewStatus.pending,
-        owner: 'lan.nguyen',
-        createdAt: now.subtract(const Duration(hours: 2)),
-      ),
-      Submission(
-        id: -2,
-        name: 'Đặt phòng họp',
-        url: 'http://192.168.122.45:3000',
-        department: 'HR',
-        visibility: SiteVisibility.public,
-        status: ReviewStatus.pending,
-        owner: 'minh.tran',
-        createdAt: now.subtract(const Duration(minutes: 25)),
-      ),
-      Submission(
-        id: -3,
-        name: 'Kaizen Board',
-        url: 'http://192.168.122.52:3000',
-        department: 'TE',
-        note: 'Bảng đề xuất cải tiến của phòng TE.',
-        visibility: SiteVisibility.public,
-        status: ReviewStatus.live,
-        owner: 'hoa.pham',
-        createdAt: now.subtract(const Duration(days: 3)),
-        reviewedAt: now.subtract(const Duration(days: 2)),
-        reviewedBy: 'admin',
-      ),
-      Submission(
-        id: -4,
-        name: 'Báo cáo cá nhân',
-        url: 'http://192.168.122.61:5000',
-        department: 'IT',
-        visibility: SiteVisibility.private,
-        status: ReviewStatus.live,
-        owner: 'minh.tran',
-        createdAt: now.subtract(const Duration(days: 1)),
-      ),
-    ]);
-  }
-
-  static Map<String, dynamic> _toJson(Submission s) => {
-    'id': s.id,
-    'name': s.name,
-    'url': s.url,
-    'department': s.department,
-    'note': s.note,
-    'visibility': s.visibility.name,
-    'status': s.status.name,
-    'owner': s.owner,
-    'createdAt': s.createdAt.millisecondsSinceEpoch,
-    'reviewedAt': s.reviewedAt?.millisecondsSinceEpoch,
-    'reviewedBy': s.reviewedBy,
-    'rejectReason': s.rejectReason,
-    'previewImage': s.previewImage,
-  };
-
-  static Submission _fromJson(Map<String, dynamic> j) {
-    DateTime? t(Object? v) =>
-        v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt()) : null;
-    return Submission(
-      id: (j['id'] as num).toInt(),
-      name: j['name'] as String,
-      url: j['url'] as String,
-      department: j['department'] as String? ?? '',
-      note: j['note'] as String? ?? '',
-      visibility: SiteVisibility.values.byName(j['visibility'] as String),
-      status: ReviewStatus.values.byName(j['status'] as String),
-      owner: j['owner'] as String,
-      createdAt: t(j['createdAt']) ?? DateTime.now(),
-      reviewedAt: t(j['reviewedAt']),
-      reviewedBy: j['reviewedBy'] as String?,
-      rejectReason: j['rejectReason'] as String?,
-      previewImage: j['previewImage'] as String?,
-    );
-  }
+  static List<Submission> _list(Object? data) => [
+    if (data is List)
+      for (final j in data)
+        if (j is Map) Submission.fromJson(Map<String, dynamic>.from(j)),
+  ];
 }
 
 final submissions = SubmissionStore.instance;
