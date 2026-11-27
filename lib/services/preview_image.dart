@@ -25,6 +25,45 @@ Future<({String? dataUrl, String? error})?> pickPreviewImage() async {
 
   final file = await picked.future;
   if (file == null) return null;
+  return _shrink(file);
+}
+
+/// Nghe Ctrl+V toàn trang: clipboard có ảnh (vd. vừa chụp bằng Snipping
+/// Tool / Print Screen) → [onStart] rồi [onDone] với ảnh đã thu nhỏ.
+/// Clipboard chỉ có chữ → bỏ qua, ô nhập vẫn dán chữ như thường.
+/// Nhớ `cancel()` subscription khi đóng dialog.
+StreamSubscription<html.ClipboardEvent> listenPastedImage({
+  required void Function() onStart,
+  required void Function(({String? dataUrl, String? error}) r) onDone,
+}) {
+  return html.document.onPaste.listen((e) async {
+    final file = _imageFromClipboard(e.clipboardData);
+    if (file == null) return;
+    e.preventDefault();
+    onStart();
+    onDone(await _shrink(file));
+  });
+}
+
+html.File? _imageFromClipboard(html.DataTransfer? data) {
+  if (data == null) return null;
+  for (final f in data.files ?? const <html.File>[]) {
+    if (f.type.startsWith('image/')) return f;
+  }
+  final items = data.items;
+  final n = items?.length ?? 0;
+  for (var i = 0; i < n; i++) {
+    final it = items![i];
+    if (it.kind == 'file' && (it.type ?? '').startsWith('image/')) {
+      final f = it.getAsFile();
+      if (f != null) return f;
+    }
+  }
+  return null;
+}
+
+/// Thu nhỏ cạnh dài còn [_maxSide] + nén JPEG.
+Future<({String? dataUrl, String? error})> _shrink(html.File file) async {
   if (!file.type.startsWith('image/')) {
     return (dataUrl: null, error: 'Chỉ nhận ảnh PNG, JPG hoặc WebP');
   }

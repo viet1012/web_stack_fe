@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../models/submission.dart';
@@ -55,7 +58,28 @@ class _UploadDialogState extends State<UploadDialog> {
   late final _url = TextEditingController(text: widget.edit?.url ?? '');
   late final _name = TextEditingController(text: widget.edit?.name ?? '');
   late final _note = TextEditingController(text: widget.edit?.note ?? '');
-  final _urlFocus = FocusNode();
+  late final _urlFocus = FocusNode(onKeyEvent: _onUrlKey);
+
+  /// Địa chỉ gợi ý (chữ mờ trong ô URL). Ô trống + Tab → điền luôn.
+  static const _urlHint = 'http://192.168.122.16:8080';
+
+  /// Tab khi ô URL trống → điền [_urlHint] và bôi đen cổng ("8080") để gõ
+  /// cổng thật đè lên. Shift+Tab / ô đã có chữ → chuyển ô như thường.
+  KeyEventResult _onUrlKey(FocusNode node, KeyEvent e) {
+    if (e is! KeyDownEvent ||
+        e.logicalKey != LogicalKeyboardKey.tab ||
+        HardwareKeyboard.instance.isShiftPressed ||
+        _url.text.trim().isNotEmpty) {
+      return KeyEventResult.ignored;
+    }
+    final port = _urlHint.lastIndexOf(':') + 1;
+    _url.value = TextEditingValue(
+      text: _urlHint,
+      selection: TextSelection(baseOffset: port, extentOffset: _urlHint.length),
+    );
+    setState(() => _urlWasEmpty = false);
+    return KeyEventResult.handled;
+  }
   final _nameFocus = FocusNode();
   final _deptMenu = MenuController();
 
@@ -83,6 +107,7 @@ class _UploadDialogState extends State<UploadDialog> {
 
   /// Chỉ hiện lỗi sau khi rời ô / bấm gửi (không báo lỗi khi đang gõ).
   bool _urlBlurred = false;
+  late bool _urlWasEmpty = _url.text.isEmpty;
   bool _tried = false;
   bool _busy = false;
 
@@ -113,9 +138,25 @@ class _UploadDialogState extends State<UploadDialog> {
   /// IT (admin) thêm / sửa → hiện ngay, không cần duyệt.
   bool get _needsReview => _public && !auth.isAdmin;
 
+  /// Ctrl+V ảnh (Snipping Tool, Print Screen…) ở bất kỳ đâu trong dialog.
+  StreamSubscription<Object?>? _pasteSub;
+
   @override
   void initState() {
     super.initState();
+    _pasteSub = listenPastedImage(
+      onStart: () {
+        if (mounted && _done == null) setState(() => _picking = true);
+      },
+      onDone: (r) {
+        if (!mounted || _done != null) return;
+        setState(() {
+          _picking = false;
+          _imageError = r.error;
+          if (r.dataUrl != null) _image = r.dataUrl;
+        });
+      },
+    );
     _urlFocus.addListener(() {
       if (_urlFocus.hasFocus) return;
       // Rời ô URL: chuẩn hoá + gợi ý tên từ host.
@@ -161,6 +202,7 @@ class _UploadDialogState extends State<UploadDialog> {
 
   @override
   void dispose() {
+    _pasteSub?.cancel();
     _url.dispose();
     _name.dispose();
     _note.dispose();
@@ -216,7 +258,8 @@ class _UploadDialogState extends State<UploadDialog> {
       _serverError = null;
     });
     final (url, _) = normalizeUrl(_url.text);
-    final note = _needsReview ? _note.text.trim() : '';
+    // Không cần duyệt (IT / Private) → ô ghi chú bị ẩn: giữ nguyên ghi chú cũ.
+    final note = _needsReview ? _note.text.trim() : (widget.edit?.note ?? '');
     try {
       final s = _isEdit
           ? await submissions.update(
@@ -270,6 +313,7 @@ class _UploadDialogState extends State<UploadDialog> {
               key: const ValueKey('done'),
               child: _Success(
                 submission: done,
+                edited: _isEdit,
                 onClose: () => Navigator.of(context).pop(done),
                 onOpenMine: widget.onOpenMine == null
                     ? null
@@ -331,7 +375,7 @@ class _UploadDialogState extends State<UploadDialog> {
           controller: _name,
           focusNode: _nameFocus,
           icon: LucideIcons.type,
-          hint: _fetchingTitle ? 'Đang lấy tên website…' : 'vd. Quản lý khuôn',
+          hint: _fetchingTitle ? 'Đang lấy tên website…' : 'vd. Production Control',
           maxLength: 40,
           textInputAction: TextInputAction.next,
           error: _nameError,
@@ -367,7 +411,9 @@ class _UploadDialogState extends State<UploadDialog> {
       icon: _isEdit ? LucideIcons.pencil : LucideIcons.globe,
       title: _isEdit ? 'Sửa website' : 'Thêm website',
       subtitle: _isEdit
-          ? 'Sửa thông tin rồi gửi lại.'
+          ? (auth.isAdmin
+                ? 'Sửa thông tin website (IT).'
+                : 'Sửa thông tin rồi gửi lại.')
           : 'Đăng ký website nội bộ để hiện trên dashboard.',
       onClose: () => Navigator.of(context).pop(),
       footer: Row(
@@ -425,11 +471,13 @@ class _UploadDialogState extends State<UploadDialog> {
             autofocus: !_isEdit,
             mono: true,
             icon: LucideIcons.link,
-            hint: 'http://192.168.1.10:8080',
+            hint: _urlHint,
             keyboardType: TextInputType.url,
             textInputAction: TextInputAction.next,
             error: _urlError,
             helper: 'Website phải truy cập được từ mạng nội bộ.',
+            // Ô trống → nhãn phím "Tab" nhắc điền nhanh địa chỉ gợi ý.
+            suffix: _url.text.isEmpty ? const _TabKeyHint() : null,
             onSubmitted: (_) {
               // Hợp lệ → sang ô Tên; sai → ở lại ô URL để sửa.
               if (normalizeUrl(_url.text).$2 == null) {
@@ -438,8 +486,14 @@ class _UploadDialogState extends State<UploadDialog> {
                 _urlFocus.requestFocus();
               }
             },
-            onChanged: (_) {
-              if (_urlBlurred || _tried) setState(() {});
+            onChanged: (v) {
+              // Rebuild khi cần báo lỗi, hoặc khi ô chuyển trống ↔ có chữ
+              // (ẩn/hiện nhãn Tab).
+              final empty = v.isEmpty;
+              if (_urlBlurred || _tried || empty != _urlWasEmpty) {
+                setState(() {});
+              }
+              _urlWasEmpty = empty;
             },
           ),
           const SizedBox(height: 18),
@@ -523,6 +577,42 @@ class _UploadDialogState extends State<UploadDialog> {
             _ErrorNote(text: _serverError!),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Nhãn phím "Tab" ở cuối ô URL (khi trống): nhấn Tab để điền địa chỉ gợi ý.
+class _TabKeyHint extends StatelessWidget {
+  const _TabKeyHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    return Tooltip(
+      message: 'Nhấn Tab để điền địa chỉ gợi ý',
+      child: Padding(
+        padding: const EdgeInsets.only(right: 10),
+        child: Center(
+          widthFactor: 1,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: c.surface2,
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(color: c.border),
+            ),
+            child: Text(
+              'Tab',
+              style: TextStyle(
+                color: c.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -746,7 +836,7 @@ class _PreviewPicker extends StatelessWidget {
         Text(
           has
               ? 'Hiện trên thẻ website thay cho ảnh chụp tự động.'
-              : 'Hoặc tải ảnh lên · PNG, JPG, WebP · tự thu nhỏ',
+              : 'Hoặc tải ảnh lên / dán (Ctrl+V) · PNG, JPG, WebP',
           style: TextStyle(color: c.muted, fontSize: 12.5, height: 1.4),
         ),
         const SizedBox(height: 8),
@@ -899,12 +989,14 @@ class _RejectNote extends StatelessWidget {
 
 class _Success extends StatelessWidget {
   final Submission submission;
+  final bool edited;
   final VoidCallback onClose;
   final VoidCallback? onOpenMine;
 
   const _Success({
     required this.submission,
     required this.onClose,
+    this.edited = false,
     this.onOpenMine,
   });
 
@@ -918,7 +1010,9 @@ class _Success extends StatelessWidget {
     return DashDialog(
       maxWidth: 480,
       icon: pending ? LucideIcons.send : LucideIcons.circleCheck,
-      title: pending ? 'Đã gửi yêu cầu duyệt' : 'Đã thêm website',
+      title: pending
+          ? 'Đã gửi yêu cầu duyệt'
+          : (edited ? 'Đã lưu thay đổi' : 'Đã thêm website'),
       onClose: onClose,
       footer: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -948,6 +1042,8 @@ class _Success extends StatelessWidget {
                   text: pending
                       ? ' sẽ hiện cho mọi người sau khi IT phê duyệt. '
                             'Bạn có thể theo dõi ở mục Website của tôi.'
+                      : edited
+                      ? ' đã được cập nhật trên dashboard.'
                       : s.isPrivate
                       ? ' đã hiện trên dashboard — chỉ bạn và IT thấy.'
                       : ' đã hiện công khai trên dashboard.',

@@ -90,6 +90,9 @@ class _DashboardState extends State<Dashboard>
     if (u?.username == _lastAccount && u?.isAdmin == _lastAdmin) return;
     _lastAccount = u?.username;
     _lastAdmin = u?.isAdmin;
+    // Đổi quyền → ẩn/hiện nút Sửa trên card (kể cả khi danh sách site
+    // không đổi nên _reloadSites không setState).
+    if (mounted) setState(() {});
     _reloadSites();
   }
 
@@ -910,6 +913,18 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
+  /// IT sửa trực tiếp 1 site bất kỳ trên dashboard (cả site hệ thống lẫn
+  /// site người dùng thêm). BE kiểm quyền admin.
+  Future<void> _editSite(Website w) async {
+    if (!auth.isAdmin) return;
+    await showUploadDialog(
+      context,
+      departments: _formDepartments,
+      systemSites: _remote,
+      edit: Submission.fromWebsite(w),
+    );
+  }
+
   void _login() => ensureLoggedIn(context);
 
   void _openMySites() {
@@ -1185,6 +1200,9 @@ class _DashboardState extends State<Dashboard>
                                 onOpenLive: () => _openLive(items[i]),
                                 starred: _starred.contains(items[i].id),
                                 onToggleStar: () => _toggleStar(items[i]),
+                                onEdit: auth.isAdmin
+                                    ? () => _editSite(items[i])
+                                    : null,
                               ),
                             ),
                           ),
@@ -1387,6 +1405,7 @@ class _DashboardState extends State<Dashboard>
           onOpenLive: () => _openLive(w),
           starred: _starred.contains(w.id),
           onToggleStar: () => _toggleStar(w),
+          onEdit: auth.isAdmin ? () => _editSite(w) : null,
         ),
       ),
     );

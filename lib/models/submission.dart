@@ -100,6 +100,22 @@ class Submission {
     );
   }
 
+  /// Admin (IT) sửa 1 site bất kỳ trên dashboard (kể cả site hệ thống) →
+  /// dựng sẵn dữ liệu cho form sửa. PUT /api/submissions/{id} cho admin sửa
+  /// được mọi site.
+  factory Submission.fromWebsite(Website w) => Submission(
+    id: w.id,
+    name: w.name,
+    url: w.url,
+    department: w.departmentName,
+    visibility: w.isPrivate ? SiteVisibility.private : SiteVisibility.public,
+    status: ReviewStatus.live,
+    owner: w.owner ?? '',
+    ownerName: w.ownerName,
+    createdAt: DateTime.now(),
+    previewImage: w.previewImage,
+  );
+
   /// Dùng để hiện lên lưới card như site thường.
   Website toWebsite() => Website(
     id: id,

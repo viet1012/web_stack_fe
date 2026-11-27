@@ -1046,7 +1046,7 @@ String timeAgoVi(DateTime t) {
     final parts = host.split('.');
     if (parts.length != 4 || parts.any((p) => p.isEmpty)) {
       return (null,
-          'IP "$host" chưa đúng — cần đủ 4 phần, vd: 192.168.1.10');
+          'IP "$host" chưa đúng — cần đủ 4 phần, vd: 192.168.122.16');
     }
     final bad = parts.firstWhere((p) => int.parse(p) > 255, orElse: () => '');
     if (bad.isNotEmpty) {
@@ -1059,7 +1059,7 @@ String timeAgoVi(DateTime t) {
 
   final uri = Uri.tryParse(s);
   if (uri == null || uri.host.isEmpty) {
-    return (null, 'Địa chỉ chưa đúng. Ví dụ: http://192.168.1.10:8080');
+    return (null, 'Địa chỉ chưa đúng. Ví dụ: http://192.168.122.16:8080');
   }
   while (s.endsWith('/')) {
     s = s.substring(0, s.length - 1);

@@ -33,6 +33,9 @@ class WebsiteCard extends StatefulWidget {
   final bool starred;
   final VoidCallback? onToggleStar;
 
+  /// Sửa site (chỉ truyền khi người xem là IT/admin). null → ẩn nút.
+  final VoidCallback? onEdit;
+
   const WebsiteCard({
     super.key,
     required this.website,
@@ -43,6 +46,7 @@ class WebsiteCard extends StatefulWidget {
     this.showPreview = true,
     this.starred = false,
     this.onToggleStar,
+    this.onEdit,
   });
 
   @override
@@ -191,6 +195,13 @@ class _WebsiteCardState extends State<WebsiteCard> {
                           color: widget.starred ? Brand.yellow : null,
                           size: widget.starred ? 19 : 16,
                           onTap: widget.onToggleStar!,
+                        ),
+                      if (widget.onEdit != null)
+                        _IconBtn(
+                          icon: LucideIcons.pencil,
+                          tooltip: 'Sửa website (IT)',
+                          size: 15,
+                          onTap: widget.onEdit!,
                         ),
                       _IconBtn(
                         icon: LucideIcons.externalLink,
