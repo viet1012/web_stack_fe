@@ -88,7 +88,7 @@ class _DashboardState extends State<Dashboard>
     }
   }();
 
-  /// Thứ tự kéo-thả của Frequently visited (danh sách id), lưu localStorage.
+  /// Thứ tự kéo-thả của Favorites (danh sách id), lưu localStorage.
   static const _favOrderKey = 'itpro.favOrder';
   List<int> _favOrder = () {
     try {
@@ -103,7 +103,7 @@ class _DashboardState extends State<Dashboard>
     }
   }();
 
-  /// Site được gắn sao (ghim lên Frequently visited), lưu localStorage.
+  /// Site được gắn sao (hiện ở Favorites), lưu localStorage.
   /// Không hết hạn — chỉ mất khi bỏ sao hoặc xoá dữ liệu trình duyệt.
   static const _starKey = 'itpro.starred';
   final Set<int> _starred = () {
@@ -128,22 +128,8 @@ class _DashboardState extends State<Dashboard>
     } catch (_) {}
   }
 
-  /// Nút X ở Frequently visited: bỏ sao (nếu có) + xoá lượt mở của site →
-  /// site biến mất khỏi khung, chỉ quay lại khi gắn sao hoặc mở lại nhiều.
-  void _removeFav(Website w) {
-    setState(() {
-      _starred.remove(w.id);
-      _favOrder.remove(w.id);
-    });
-    try {
-      html.window.localStorage[_starKey] = jsonEncode(_starred.toList());
-      html.window.localStorage[_favOrderKey] = jsonEncode(_favOrder);
-    } catch (_) {}
-    visits.forget(w.id);
-  }
-
-  /// Sắp [items] (đã theo số lượt mở) theo thứ tự người dùng kéo thả.
-  /// Site chưa từng được kéo → đứng sau, giữ thứ tự theo lượt mở.
+  /// Sắp [items] theo thứ tự người dùng kéo thả.
+  /// Site chưa từng được kéo → đứng sau, giữ thứ tự gốc.
   List<Website> _applyFavOrder(List<Website> items) {
     int rank(Website w) {
       final i = _favOrder.indexOf(w.id);
@@ -325,13 +311,11 @@ class _DashboardState extends State<Dashboard>
         TourStep(
           target: _tk.frequent,
           icon: LucideIcons.star,
-          title: 'Frequently visited',
-          body:
-              'Site đã gắn sao (luôn hiện) + site bạn mở nhiều nhất trong 30 '
-              'ngày gần đây.',
+          title: 'Favorites',
+          body: 'Các site bạn đã gắn sao ★.',
           items: const [
             (LucideIcons.grab, 'Kéo thả thẻ để đổi thứ tự'),
-            (LucideIcons.x, 'Gỡ site khỏi khung này'),
+            (LucideIcons.star, 'Bỏ sao để gỡ site khỏi khung này'),
           ],
         ),
         TourStep(
@@ -343,7 +327,7 @@ class _DashboardState extends State<Dashboard>
               '/ cần đăng nhập / đang kiểm tra, đỏ = offline, xám = chưa kiểm tra. '
               'Di chuột lên chấm để xem chi tiết.',
           items: const [
-            (LucideIcons.star, 'Gắn sao để ghim site lên Frequently visited'),
+            (LucideIcons.star, 'Gắn sao để thêm site vào Favorites'),
             (LucideIcons.externalLink, 'Mở site trong tab mới'),
             (LucideIcons.copy, 'Sao chép địa chỉ URL'),
             (
@@ -827,10 +811,10 @@ class _DashboardState extends State<Dashboard>
           ),
         ),
 
-        // Frequently visited
+        // Favorites
         SliverToBoxAdapter(
           child: ListenableBuilder(
-            listenable: Listenable.merge([store, visits]),
+            listenable: store,
             builder: (context, _) => _frequent(pad),
           ),
         ),
@@ -886,30 +870,14 @@ class _DashboardState extends State<Dashboard>
   }
 
   // ------------------------------------------------------------
-  // FREQUENTLY VISITED
+  // FAVORITES
   // ------------------------------------------------------------
 
-  /// Ô tối đa cho site "tự động" (mở nhiều nhất). Site gắn sao không giới hạn.
-  static const _autoFavSlots = 5;
-
+  /// Chỉ hiện site user đã gắn sao (kể cả offline). Không gắn sao → ẩn khung.
   Widget _frequent(double pad) {
-    // 1. Site gắn sao: luôn hiện (kể cả offline).
-    final starred = all.where((w) => _starred.contains(w.id)).toList();
-    // 2. Site mở nhiều nhất (30 ngày, đang online), chưa gắn sao →
-    //    lấp cho đủ 5 ô.
-    final auto =
-        all
-            .where(
-              (w) =>
-                  !_starred.contains(w.id) &&
-                  _st(w).isReachable &&
-                  visits.count(w.id) > 0,
-            )
-            .toList()
-          ..sort((a, b) => visits.count(b.id).compareTo(visits.count(a.id)));
-    final free = (_autoFavSlots - starred.length).clamp(0, _autoFavSlots);
-
-    final items = _applyFavOrder([...starred, ...auto.take(free)]);
+    final items = _applyFavOrder(
+      all.where((w) => _starred.contains(w.id)).toList(),
+    );
     if (items.isEmpty) return const SizedBox.shrink();
     final c = context.dash;
 
@@ -926,19 +894,19 @@ class _DashboardState extends State<Dashboard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Tiêu đề: ★ Frequently visited · số site
+            // Tiêu đề: ★ Favorites · số site
             Padding(
               padding: const EdgeInsets.fromLTRB(3, 0, 3, 9),
               child: Tooltip(
                 message:
-                    'Site đã gắn sao ★ (luôn hiện) + site bạn mở nhiều nhất '
-                    'trong 30 ngày gần nhất. Kéo thả để đổi thứ tự.',
+                    'Site bạn đã gắn sao ★. Kéo thả để đổi thứ tự, bỏ sao để '
+                    'gỡ khỏi khung.',
                 child: Row(
                   children: [
                     const Icon(LucideIcons.star, size: 15, color: Brand.yellow),
                     const SizedBox(width: 7),
                     Text(
-                      'Frequently visited',
+                      'Favorites',
                       style: displayText(
                         size: 15,
                         weight: FontWeight.w700,
@@ -997,7 +965,6 @@ class _DashboardState extends State<Dashboard>
                                 onOpenLive: () => _openLive(items[i]),
                                 starred: _starred.contains(items[i].id),
                                 onToggleStar: () => _toggleStar(items[i]),
-                                onRemove: () => _removeFav(items[i]),
                               ),
                             ),
                           ),

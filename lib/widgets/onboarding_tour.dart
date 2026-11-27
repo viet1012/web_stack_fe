@@ -10,8 +10,8 @@ import '../theme/dash_theme.dart';
 // ============================================================
 
 /// 1 bước hướng dẫn. [target] = null → thẻ giữa màn hình (chào mừng).
-/// Bước có [target] nhưng widget chưa hiển thị (vd. chưa có Frequently
-/// visited) sẽ tự bỏ qua.
+/// Bước có [target] nhưng widget chưa hiển thị (vd. chưa gắn sao
+/// site nào → chưa có Favorites) sẽ tự bỏ qua.
 class TourStep {
   final GlobalKey? target;
   final IconData icon;

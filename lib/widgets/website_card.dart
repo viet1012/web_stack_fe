@@ -28,12 +28,9 @@ class WebsiteCard extends StatefulWidget {
   /// Nút ẩn/hiện preview ở header (áp dụng cho mọi card).
   final bool showPreview;
 
-  /// Gắn sao = ghim lên khung Frequently visited.
+  /// Gắn sao = thêm vào khung Favorites.
   final bool starred;
   final VoidCallback? onToggleStar;
-
-  /// Nút X (chỉ có ở Frequently visited) — gỡ site khỏi khung.
-  final VoidCallback? onRemove;
 
   const WebsiteCard({
     super.key,
@@ -45,7 +42,6 @@ class WebsiteCard extends StatefulWidget {
     this.showPreview = true,
     this.starred = false,
     this.onToggleStar,
-    this.onRemove,
   });
 
   @override
@@ -174,8 +170,8 @@ class _WebsiteCardState extends State<WebsiteCard> {
                               ? Icons.star_rounded
                               : LucideIcons.star,
                           tooltip: widget.starred
-                              ? 'Bỏ sao (gỡ khỏi Frequently visited)'
-                              : 'Gắn sao (ghim lên Frequently visited)',
+                              ? 'Bỏ sao (gỡ khỏi Favorites)'
+                              : 'Gắn sao (thêm vào Favorites)',
                           color: widget.starred ? Brand.yellow : null,
                           size: widget.starred ? 19 : 16,
                           onTap: widget.onToggleStar!,
@@ -191,12 +187,6 @@ class _WebsiteCardState extends State<WebsiteCard> {
                         color: _copied ? t.okFg : null,
                         onTap: _copy,
                       ),
-                      if (widget.onRemove != null)
-                        _IconBtn(
-                          icon: LucideIcons.x,
-                          tooltip: 'Gỡ khỏi Frequently visited',
-                          onTap: widget.onRemove!,
-                        ),
                     ],
                   ),
                 ),
