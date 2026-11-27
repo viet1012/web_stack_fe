@@ -1,6 +1,6 @@
 # IT PRO — Website Dashboard
 
-Flutter Web dashboard theo dõi các website nội bộ: trạng thái online/offline, độ trễ, chứng chỉ, ảnh chụp màn hình, favicon. Nhóm theo phòng ban, hỗ trợ Light/Dark.
+Flutter Web dashboard theo dõi các website nội bộ: trạng thái online/offline, độ trễ, chứng chỉ, ảnh chụp màn hình, favicon. Nhóm theo phòng ban, hỗ trợ Sáng/Tối + 10 chủ đề màu theo lĩnh vực.
 
 - Flutter **3.38** (stable), Dart **^3.10**. Chỉ chạy trên **web** (dùng `dart:html`).
 - Trạng thái, ảnh chụp, favicon đều lấy từ **backend** (FE không tự ping site).
@@ -14,7 +14,7 @@ Flutter Web dashboard theo dõi các website nội bộ: trạng thái online/of
 3. [API backend cần có](#3-api-backend-cần-có)
 4. [Cấu trúc thư mục](#4-cấu-trúc-thư-mục)
 5. [Tính năng giao diện](#5-tính-năng-giao-diện)
-6. [Theme Light/Dark & hiệu ứng rèm cửa](#6-theme-lightdark--hiệu-ứng-rèm-cửa)
+6. [Theme Sáng/Tối, chủ đề màu & rèm cửa](#theme)
 7. [Màu, font, icon](#7-màu-font-icon)
 8. [Dữ liệu lưu ở trình duyệt](#8-dữ-liệu-lưu-ở-trình-duyệt)
 9. [Hiệu năng — những điều KHÔNG nên làm](#9-hiệu-năng--những-điều-không-nên-làm)
@@ -25,35 +25,52 @@ Flutter Web dashboard theo dõi các website nội bộ: trạng thái online/of
 ## 1. Chạy project
 
 ```bash
-cd D:\Viet\WEB\web_stack
+cd D:\Viet\web_stack_fe
 flutter pub get
+```
 
-# Dev (debug — chậm hơn bản thật 5–10 lần, KHÔNG dùng để đánh giá độ mượt)
-flutter run -d chrome
+### Chọn API khi chạy
 
-# Đánh giá hiệu năng / độ mượt
-flutter run -d chrome --release
+| Muốn dùng | Lệnh | BE |
+|---|---|---|
+| **API local** (BE chạy ở máy mình) | `flutter run -d chrome --web-port=5000` | `http://localhost:9999` |
+| **API public** (BE trên server) | `flutter run -d chrome --web-port=5000 --dart-define=API_BASE=http://192.168.122.16:9095` | `http://192.168.122.16:9095` |
 
-# Build deploy
-flutter build web --release      # output: build/web
+- **VS Code:** F5 → chọn *FE · BE local (localhost:9999)* hoặc *FE · BE server (192.168.122.16:9095)* ([`.vscode/launch.json`](.vscode/launch.json)).
+- **Luôn giữ `--web-port=5000`**: đổi cổng = đổi origin → mất localStorage (đăng nhập, sao, cache ảnh…).
+- API local cần bật **dev_manager_be** ở máy mình trước.
+- Kiểm tra đang gọi BE nào: Console trình duyệt → dòng `[API] http://…`.
+
+### Hiệu năng & deploy
+
+```bash
+# Debug chậm hơn bản thật 5–10 lần → đánh giá độ mượt bằng release
+flutter run -d chrome --web-port=5000 --release
+
+# Build deploy (output: build/web). Mở từ địa chỉ server → tự dùng BE server.
+flutter build web --release
+# Ép BE khác khi build:
+flutter build web --release --dart-define=API_BASE=http://<host>:<port>
 ```
 
 > **Sau khi thêm package, asset, font hoặc đổi layout lớn: dừng hẳn (`q`) rồi chạy lại.**
 > Hot reload/hot restart có thể không nạp thay đổi → thấy lỗi "cũ" dù code đã sửa.
-> Cách kiểm tra đang chạy đúng bản mới: tab trình duyệt có tiêu đề **IT PRO** + logo, header có nút **mặt trời/mặt trăng**.
+> Cách kiểm tra đang chạy đúng bản mới: tab trình duyệt có tiêu đề **IT PRO** + logo, header có nút **Giao diện** (icon bảng màu).
 
 ---
 
 ## 2. Cấu hình backend
 
-Địa chỉ backend nằm ở [`lib/services/website_service.dart`](lib/services/website_service.dart):
+Địa chỉ BE được **chọn tự động** bởi `resolveApiBase()` trong [`lib/services/website_service.dart`](lib/services/website_service.dart) — **không cần sửa code** khi đổi dev ↔ server. Thứ tự ưu tiên:
 
-```dart
-baseUrl: 'http://localhost:9999',          // dev
-// baseUrl: 'http://192.168.122.16:9095',  // server nội bộ
-```
+| # | Điều kiện | BE dùng |
+|---|---|---|
+| 1 | Có `--dart-define=API_BASE=…` | Địa chỉ đó |
+| 2 | Trang mở ở `localhost` / `127.0.0.1` | `kLocalApi` = `http://localhost:9999` |
+| 3 | Còn lại (mở từ server / máy khác) | `kServerApi` = `http://192.168.122.16:9095` |
 
-Mọi API (danh sách site, status, screenshot, favicon) dùng chung `baseUrl` này.
+Đổi cổng BE local / địa chỉ server → sửa hằng `kLocalApi` / `kServerApi`.
+Mọi API (danh sách site, status, screenshot, favicon, đăng nhập, submissions) dùng chung địa chỉ này.
 
 **CORS:** backend phải trả header CORS cho origin của FE, cho **cả** `/api/websites/{id}/favicon` (favicon được tải bằng canvas, không dùng thẻ `<img>`; thiếu CORS → hiện icon glyph thay vì favicon).
 
@@ -120,7 +137,7 @@ lib/
 │   ├── auth_store.dart           # Đăng nhập (token backlog-be)
 │   └── submission_store.dart     # Thêm / duyệt website (/api/submissions)
 ├── theme/
-│   └── dash_theme.dart           # Token màu Light/Dark, StatusTone, màu phòng ban, font, Motion, ThemeController
+│   └── dash_theme.dart           # Token màu Light/Dark, DashPalette (chủ đề màu), StatusTone, màu phòng ban, font, Motion, ThemeController
 ├── screens/
 │   └── dashboard.dart            # Trang chính: header, toolbar, frequently visited, banner, lưới nhóm
 └── widgets/
@@ -129,6 +146,7 @@ lib/
     ├── site_icons.dart           # SiteIcon (favicon → glyph), map tên icon Lucide
     ├── dash_ui.dart              # Helper dùng chung: chip, chip trạng thái, Cert warning, copy/open
     ├── theme_curtain.dart        # Hiệu ứng rèm cửa khi đổi theme
+    ├── theme_picker.dart         # Popover "Giao diện": Sáng/Tối + lưới chủ đề màu
     ├── site_thumbnail.dart       # Ảnh preview + placeholder
     ├── preview_dialog.dart       # Dialog xem live (iframe)
     ├── iframe_view.dart
@@ -153,7 +171,8 @@ File cũ không còn được import ở đâu (có thể xoá): `screens/port_s
   (chấm xanh nếu không có site offline, đỏ nếu có).
 - Màn rộng: **search + bộ lọc All/Online/Offline nằm cùng hàng tiêu đề** (tiết kiệm chiều cao). Màn hẹp: xuống hàng riêng.
 - Nút **ẩn/hiện preview** (icon ảnh): bật/tắt ảnh preview của **tất cả** card cùng lúc, nhớ lựa chọn (`itpro.showPreview`).
-- Nút **đổi theme** (mặt trời/mặt trăng) + nút **Refresh** (chụp lại ảnh + gọi lại status, khoá 10s).
+- Nút **Giao diện** (icon bảng màu, chấm nhỏ = màu chủ đề đang dùng): mở popover chọn **Sáng/Tối** + **chủ đề màu** (xem [mục 6](#theme)).
+- Nút **Refresh** (chụp lại ảnh + gọi lại status, khoá 10s).
 - Phím tắt: `/` focus ô search, `Esc` xoá search.
 - Tự refresh mỗi 60s; tạm dừng khi tab trình duyệt bị ẩn.
 
@@ -218,34 +237,61 @@ File cũ không còn được import ở đâu (có thể xoá): `screens/port_s
 
 ### Sidebar
 - Logo IT PRO, **All sites**, danh sách **DEPARTMENTS** (ô viết tắt màu phòng ban, số site, viên đỏ `↓n` nếu có offline), **System health x/y** + thanh tiến độ.
-- Mục đang chọn: nền vàng nhạt + thanh vàng 3px bên trái.
+- Mục đang chọn: nền đặc **màu nhấn của chủ đề** (`brand`, Graphite = vàng) + chữ `onBrand` + bóng nhẹ.
 - **Thu gọn/mở rộng** (nút `«` / `»`): 232px ↔ 64px, có animation, nhớ trạng thái. Khi thu gọn: chỉ còn ô viết tắt + tooltip.
 - Màn < 900px: sidebar chuyển thành thanh ngang phía trên (logo + health + chip phòng ban).
 
 ---
 
-## 6. Theme Light/Dark & hiệu ứng rèm cửa
+<a id="theme"></a>
 
-### Chọn theme
-- **Mặc định theo hệ điều hành** (Windows/trình duyệt). Bấm nút → nhớ lựa chọn (`dash.themeMode`).
-- Code: `ThemeController` trong [`dash_theme.dart`](lib/theme/dash_theme.dart); `main.dart` dựng sẵn `theme` + `darkTheme`.
+## 6. Theme Sáng/Tối, chủ đề màu & rèm cửa
+
+### Chọn giao diện
+
+Nút **Giao diện** ở header → popover ([`theme_picker.dart`](lib/widgets/theme_picker.dart)):
+
+- **Sáng | Tối** — mặc định theo hệ điều hành; bấm → nhớ lựa chọn (`dash.themeMode`), đổi có hiệu ứng rèm.
+- **Chủ đề màu** — lưới 2 cột, mỗi ô có "cửa sổ thu nhỏ" vẽ bằng màu chủ đề. Bấm = đổi ngay (popover vẫn mở để thử tiếp), nhớ lựa chọn (`dash.palette`).
+
+| Chủ đề | Lĩnh vực | Màu nhấn | | Chủ đề | Lĩnh vực | Màu nhấn |
+|---|---|---|---|---|---|---|
+| Graphite | Mặc định | `#FFC93C` | | Steel | Xưởng | `#0284C7` |
+| Indigo | IT | `#4F46E5` | | Navy | KVH | `#1D4ED8` |
+| Teal | MA | `#0D9488` | | Plum | HR | `#7C3AED` |
+| Forest | PC | `#059669` | | Rose | TE | `#BE185D` |
+| Copper | Product | `#C2410C` | | Bronze | Văn phòng | `#A16207` |
+
+Nguyên tắc "sạch & tinh tế":
+
+- Nền / viền / chữ chỉ **ám rất nhẹ** sắc độ chủ đề (HSL độ bão hoà thấp).
+- Màu nhấn chỉ ở vài điểm: mục sidebar đang chọn, viền tour, vùng bôi chữ, chấm trên nút Giao diện.
+- Nút chính (`ink`, vd. *Thêm website*) = **tông rất đậm** của màu nhấn (Sáng) / **tông rất nhạt** (Tối) thay cho đen/trắng thuần.
+- Màu trạng thái (`StatusTone`) và màu phòng ban **không đổi** theo chủ đề.
+
+Code ([`dash_theme.dart`](lib/theme/dash_theme.dart)):
+
+- `DashPalette` (id, name, scope, light, dark). Graphite = bảng `DashColors.light/dark` viết tay; các chủ đề khác sinh bằng `DashColors.tinted(hue, brand, tint)`.
+- **Thêm chủ đề:** thêm 1 dòng `DashPalette.tinted(...)` vào `DashPalette.all` (`hue` = sắc độ nền, `tint` = độ ám, `brand` = màu nhấn).
+- `ThemeController.mode` + `ThemeController.palette`; `main.dart` dựng & cache `ThemeData` theo (chủ đề, sáng/tối).
+- Đổi chủ đề **không dùng rèm**: bật `Motion.instant` trong đúng frame đổi màu để tránh hàng trăm animation chạy cùng lúc.
 
 ### Token màu
 Mọi màu lấy từ theme, **không ghi cứng mã màu trong widget**:
 
 | Nhóm | Truy cập | Gồm |
 |---|---|---|
-| `DashColors` | `context.dash` | `bg`, `surface`, `surface2`, `border`, `text`, `muted`, `textSoft`, `faint`, `hostText`, `ink`/`onInk` (nút đảo màu), `navActive` |
+| `DashColors` | `context.dash` | `bg`, `surface`, `surface2`, `border`, `text`, `muted`, `textSoft`, `faint`, `hostText`, `ink`/`onInk` (nút chính), `navActive`, `brand`/`onBrand` (màu nhấn chủ đề) |
 | `StatusTone` | `context.tone` | `okFg/okBg`, `slowFg/slowBg`, `offFg/offBg/offBorder`, `bannerBg/bannerText`, `idleFg/idleBg`, `dotOk/dotBad` |
 | Màu phòng ban | `context.dept('KVH')` | `fg`, `bg` — Dark tự sáng chữ ~40%, nền = màu gốc 20% alpha |
 
-Bảng Dark: graphite trung tính (nền `#0D1015`, card `#161A21`, viền `#2A303A`, chữ `#E8EAEE`), chip trạng thái dùng nền = màu chữ ~12% alpha.
+Bảng Dark (Graphite): trung tính (nền `#0D1015`, card `#161A21`, viền `#2A303A`, chữ `#E8EAEE`), chip trạng thái dùng nền = màu chữ ~12% alpha.
 
-Thêm màu mới → thêm field vào `DashColors`/`StatusTone` (cả `light`, `dark`, `copyWith`, `lerp`).
+Thêm màu mới → thêm field vào `DashColors`/`StatusTone` (cả `light`, `dark`, `DashColors.tinted`, `copyWith`, `lerp`).
 
 ### Hiệu ứng rèm cửa — [`theme_curtain.dart`](lib/widgets/theme_curtain.dart)
 
-Đặt trong `MaterialApp.builder`; nút đổi theme gọi `ThemeCurtain.of(context)?.toggle()`.
+Đặt trong `MaterialApp.builder`; nút Sáng/Tối trong popover gọi `ThemeCurtain.of(context)?.toggle()`. Màu nền rèm lấy theo chủ đề đang dùng.
 
 | Nhịp | Thời gian | Diễn biến |
 |---|---|---|
@@ -282,7 +328,7 @@ Chỉnh tốc độ: hằng `_close`, `_morph`, `_open` trong `ThemeCurtainState
 | IT | `#4338CA` | `#E8E8FB` | WH | `#475569` | `#EDF0F4` |
 
 Phòng ban khác → dùng màu WH. Alias: `PRODUCTION` → PRO, `WAREHOUSE` → WH.
-Vàng `#FFC93C` chỉ dùng cho mục đang chọn và nút theme ở Dark.
+Vàng `#FFC93C` (`Brand.yellow`): màu nhấn của chủ đề Graphite, sao ★ Favorites, badge admin. Mục đang chọn dùng `c.brand` (đổi theo chủ đề).
 
 ### Font (`google_fonts`, preload lúc khởi động)
 - **Inter** — nội dung · **Space Grotesk** — tiêu đề/số liệu (`displayText()`) · **JetBrains Mono** — URL/host (`monoText()`).
@@ -322,6 +368,7 @@ Thêm icon: sửa `kSiteIcons` (và `_byName` nếu muốn tự đoán) trong [`
 | `itpro.starred` | `[siteId, …]` — site gắn sao (hiện ở Favorites, không hết hạn) |
 | `itpro.auth` | Token đăng nhập + tên / vai trò hiển thị (**không** lưu mật khẩu). Vai trò được xác nhận lại qua `/api/auth/me` mỗi lần mở trang |
 | `flutter.dash.themeMode` | `light` / `dark` (không có = theo hệ điều hành) |
+| `flutter.dash.palette` | id chủ đề màu: `graphite`, `it`, `ma`, `pc`, `product`, `factory`, `kvh`, `hr`, `te`, `classic` (không có = Graphite) |
 | `flutter.dash.lastSeen.v2` | Lần cuối mỗi site online |
 
 (Key có tiền tố `flutter.` do `shared_preferences` thêm vào.)
@@ -350,7 +397,6 @@ Card bọc `RepaintBoundary` → hover 1 card không repaint cả lưới.
 ## 10. Lưu ý & việc còn tồn đọng
 
 - [ ] **Gỡ khối debug** trong [`main.dart`](lib/main.dart): `FlutterError.onError = … forceReport: true` (in đầy đủ mọi lỗi, chỉ chạy ở debug).
-- [ ] Đổi `baseUrl` về server nội bộ trước khi deploy.
 - [ ] Màn trắng loé lên khi **tải lại trang** ở Dark (trình duyệt hiện nền trắng trước khi Flutter tải xong) — có thể sửa bằng nền tối trong `web/index.html`.
 - [ ] Dialog Preview chưa rà kỹ ở Dark.
 - [ ] Xoá các widget cũ không dùng (xem [mục 4](#4-cấu-trúc-thư-mục)).

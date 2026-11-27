@@ -39,6 +39,11 @@ class DashColors extends ThemeExtension<DashColors> {
   /// Nền nav item đang chọn (vàng nhạt).
   final Color navActive;
 
+  /// Màu nhấn thương hiệu của chủ đề (nav/rail đang chọn, viền tour, chấm
+  /// chủ đề) + chữ trên nó.
+  final Color brand;
+  final Color onBrand;
+
   const DashColors({
     required this.bg,
     required this.surface,
@@ -58,7 +63,83 @@ class DashColors extends ThemeExtension<DashColors> {
     required this.ink,
     required this.onInk,
     required this.navActive,
+    required this.brand,
+    required this.onBrand,
   });
+
+  /// Sinh bảng màu từ 1 sắc độ trung tính ([hue], [tint] = độ ám màu) và
+  /// 1 màu nhấn ([brand]). Nền/viền/chữ chỉ ám rất nhẹ → sạch; màu nhấn chỉ
+  /// xuất hiện ở nút chính (tông đậm), mục đang chọn và vài điểm nhỏ.
+  factory DashColors.tinted({
+    required Brightness brightness,
+    required double hue,
+    required Color brand,
+    double tint = 1,
+  }) {
+    Color n(double s, double l) =>
+        HSLColor.fromAHSL(1, hue, (s * tint).clamp(0.0, 1.0), l).toColor();
+    final b = HSLColor.fromColor(brand);
+    Color onOf(Color x) =>
+        x.computeLuminance() > .42 ? const Color(0xFF111827) : Colors.white;
+
+    if (brightness == Brightness.light) {
+      final surface = n(.40, .995);
+      // Nút chính = tông rất đậm của màu nhấn (thay đen thuần) → sang hơn.
+      final ink = b.withSaturation(b.saturation.clamp(0.0, .62)).withLightness(.25).toColor();
+      return DashColors(
+        bg: n(.24, .966),
+        surface: surface,
+        surface2: n(.22, .947),
+        border: n(.16, .885),
+        text: n(.32, .13),
+        muted: n(.11, .42),
+        accent: ink,
+        cyan: brand,
+        ok: DashColors.light.ok,
+        bad: DashColors.light.bad,
+        warn: DashColors.light.warn,
+        shadow: n(.30, .12).withValues(alpha: .08),
+        textSoft: n(.14, .32),
+        faint: n(.08, .64),
+        hostText: n(.11, .42),
+        ink: ink,
+        onInk: Colors.white,
+        navActive: Color.alphaBlend(brand.withValues(alpha: .12), surface),
+        brand: brand,
+        onBrand: onOf(brand),
+      );
+    }
+
+    // Dark: màu nhấn sáng lên cho đủ tương phản trên nền tối.
+    final lit = b
+        .withSaturation(b.saturation.clamp(0.0, .78))
+        .withLightness(b.lightness < .64 ? .64 : b.lightness)
+        .toColor();
+    final bg = n(.22, .062);
+    final ink = b.withSaturation(b.saturation.clamp(0.0, .55)).withLightness(.88).toColor();
+    return DashColors(
+      bg: bg,
+      surface: n(.17, .098),
+      surface2: n(.15, .136),
+      border: n(.13, .19),
+      text: n(.18, .92),
+      muted: n(.09, .65),
+      accent: ink,
+      cyan: lit,
+      ok: DashColors.dark.ok,
+      bad: DashColors.dark.bad,
+      warn: DashColors.dark.warn,
+      shadow: const Color(0x66000000),
+      textSoft: n(.11, .80),
+      faint: n(.07, .45),
+      hostText: n(.08, .60),
+      ink: ink,
+      onInk: bg,
+      navActive: lit.withValues(alpha: .17),
+      brand: lit,
+      onBrand: onOf(lit),
+    );
+  }
 
   static const light = DashColors(
     bg: Color(0xFFF6F7F9),
@@ -79,6 +160,8 @@ class DashColors extends ThemeExtension<DashColors> {
     ink: Color(0xFF111827),
     onInk: Color(0xFFFFFFFF),
     navActive: Color(0xFFFFF4D6),
+    brand: Brand.yellow,
+    onBrand: Color(0xFF111827),
   );
 
   /// Dark trung tính (graphite), không ám xanh navy; card sáng hơn nền 1 bậc.
@@ -101,6 +184,8 @@ class DashColors extends ThemeExtension<DashColors> {
     ink: Color(0xFFE8EAEE),
     onInk: Color(0xFF0D1015),
     navActive: Color(0x29FFC93C),
+    brand: Brand.yellow,
+    onBrand: Color(0xFF111827),
   );
 
   @override
@@ -123,6 +208,8 @@ class DashColors extends ThemeExtension<DashColors> {
         ink: ink,
         onInk: onInk,
         navActive: navActive,
+        brand: brand,
+        onBrand: onBrand,
       );
 
   @override
@@ -148,6 +235,8 @@ class DashColors extends ThemeExtension<DashColors> {
       ink: l(ink, other.ink),
       onInk: l(onInk, other.onInk),
       navActive: l(navActive, other.navActive),
+      brand: l(brand, other.brand),
+      onBrand: l(onBrand, other.onBrand),
     );
   }
 }
@@ -394,11 +483,143 @@ class Motion {
 // THEME MODE (localStorage qua shared_preferences)
 // ============================================================
 
+// ============================================================
+// PALETTES (chủ đề màu theo lĩnh vực)
+// ============================================================
+
+/// 1 chủ đề màu, có đủ bản Light + Dark.
+@immutable
+class DashPalette {
+  final String id;
+
+  /// Tên chủ đề (vd. "Indigo") + lĩnh vực gợi ý (vd. "IT").
+  final String name;
+  final String scope;
+  final DashColors light;
+  final DashColors dark;
+
+  const DashPalette({
+    required this.id,
+    required this.name,
+    required this.scope,
+    required this.light,
+    required this.dark,
+  });
+
+  DashPalette.tinted({
+    required this.id,
+    required this.name,
+    required this.scope,
+    required double hue,
+    required Color brand,
+    double tint = 1,
+  }) : light = DashColors.tinted(
+         brightness: Brightness.light,
+         hue: hue,
+         brand: brand,
+         tint: tint,
+       ),
+       dark = DashColors.tinted(
+         brightness: Brightness.dark,
+         hue: hue,
+         brand: brand,
+         tint: tint,
+       );
+
+  DashColors of(Brightness b) => b == Brightness.dark ? dark : light;
+
+  static const graphite = DashPalette(
+    id: 'graphite',
+    name: 'Graphite',
+    scope: 'Mặc định',
+    light: DashColors.light,
+    dark: DashColors.dark,
+  );
+
+  /// Thứ tự hiển thị trong bảng chọn.
+  static final all = <DashPalette>[
+    graphite,
+    DashPalette.tinted(
+      id: 'it',
+      name: 'Indigo',
+      scope: 'IT',
+      hue: 232,
+      brand: const Color(0xFF4F46E5),
+    ),
+    DashPalette.tinted(
+      id: 'ma',
+      name: 'Teal',
+      scope: 'MA',
+      hue: 182,
+      brand: const Color(0xFF0D9488),
+    ),
+    DashPalette.tinted(
+      id: 'pc',
+      name: 'Forest',
+      scope: 'PC',
+      hue: 150,
+      brand: const Color(0xFF059669),
+    ),
+    DashPalette.tinted(
+      id: 'product',
+      name: 'Copper',
+      scope: 'Product',
+      hue: 28,
+      tint: .9,
+      brand: const Color(0xFFC2410C),
+    ),
+    DashPalette.tinted(
+      id: 'factory',
+      name: 'Steel',
+      scope: 'Xưởng',
+      hue: 205,
+      tint: 1.25,
+      brand: const Color(0xFF0284C7),
+    ),
+    DashPalette.tinted(
+      id: 'kvh',
+      name: 'Navy',
+      scope: 'KVH',
+      hue: 222,
+      brand: const Color(0xFF1D4ED8),
+    ),
+    DashPalette.tinted(
+      id: 'hr',
+      name: 'Plum',
+      scope: 'HR',
+      hue: 275,
+      tint: .85,
+      brand: const Color(0xFF7C3AED),
+    ),
+    DashPalette.tinted(
+      id: 'te',
+      name: 'Rose',
+      scope: 'TE',
+      hue: 340,
+      tint: .8,
+      brand: const Color(0xFFBE185D),
+    ),
+    DashPalette.tinted(
+      id: 'classic',
+      name: 'Bronze',
+      scope: 'Văn phòng',
+      hue: 38,
+      tint: .8,
+      brand: const Color(0xFFA16207),
+    ),
+  ];
+
+  static DashPalette byId(String? id) =>
+      all.firstWhere((p) => p.id == id, orElse: () => graphite);
+}
+
 /// Mặc định theo hệ điều hành; người dùng bấm đổi → nhớ lựa chọn.
 class ThemeController {
   static const _key = 'dash.themeMode';
+  static const _paletteKey = 'dash.palette';
 
   static final mode = ValueNotifier<ThemeMode>(ThemeMode.system);
+  static final palette = ValueNotifier<DashPalette>(DashPalette.graphite);
 
   static Future<void> load() async {
     try {
@@ -408,6 +629,21 @@ class ThemeController {
         'dark' => ThemeMode.dark,
         _ => ThemeMode.system,
       };
+      palette.value = DashPalette.byId(prefs.getString(_paletteKey));
+    } catch (_) {}
+  }
+
+  /// Đổi chủ đề màu. Màu đổi tức thì trong đúng frame đó (không để hàng
+  /// trăm AnimatedContainer tự animate → đỡ giật).
+  static Future<void> setPalette(DashPalette p) async {
+    if (palette.value.id == p.id) return;
+    Motion.instant = true;
+    palette.value = p;
+    await WidgetsBinding.instance.endOfFrame;
+    Motion.instant = false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_paletteKey, p.id);
     } catch (_) {}
   }
 
@@ -425,9 +661,12 @@ class ThemeController {
   }
 }
 
-ThemeData buildDashTheme(Brightness brightness) {
+ThemeData buildDashTheme(
+  Brightness brightness, [
+  DashPalette palette = DashPalette.graphite,
+]) {
   final dark = brightness == Brightness.dark;
-  final c = dark ? DashColors.dark : DashColors.light;
+  final c = palette.of(brightness);
   final tone = dark ? StatusTone.dark : StatusTone.light;
 
   return ThemeData(
@@ -456,7 +695,9 @@ ThemeData buildDashTheme(Brightness brightness) {
     highlightColor: c.text.withValues(alpha: .04),
     textSelectionTheme: TextSelectionThemeData(
       cursorColor: c.text,
-      selectionColor: const Color(0xFF3B82F6).withValues(alpha: .3),
+      selectionColor: palette == DashPalette.graphite
+          ? const Color(0xFF3B82F6).withValues(alpha: .3)
+          : c.brand.withValues(alpha: .28),
     ),
     scrollbarTheme: ScrollbarThemeData(
       thumbColor: WidgetStatePropertyAll(c.faint.withValues(alpha: .5)),
@@ -467,9 +708,11 @@ ThemeData buildDashTheme(Brightness brightness) {
       waitDuration: const Duration(milliseconds: 400),
       textStyle: TextStyle(color: dark ? c.text : Colors.white, fontSize: 12),
       decoration: BoxDecoration(
-        color: dark ? const Color(0xFF2A303A) : const Color(0xFF111827),
+        color: dark ? c.border : c.text,
         borderRadius: BorderRadius.circular(6),
-        border: dark ? Border.all(color: const Color(0xFF3A414D)) : null,
+        border: dark
+            ? Border.all(color: Color.lerp(c.border, c.text, .1)!)
+            : null,
       ),
     ),
     snackBarTheme: SnackBarThemeData(

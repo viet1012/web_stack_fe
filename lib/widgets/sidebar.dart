@@ -399,7 +399,7 @@ class _RailItem extends StatelessWidget {
                   boxShadow: active
                       ? [
                           BoxShadow(
-                            color: Brand.yellow.withValues(alpha: .35),
+                            color: c.brand.withValues(alpha: .35),
                             blurRadius: 10,
                             offset: const Offset(0, 2),
                           ),
@@ -411,7 +411,7 @@ class _RailItem extends StatelessWidget {
                   radius: 12,
                   gap: 0,
                   active: active,
-                  activeColor: Brand.yellow,
+                  activeColor: c.brand,
                   idleColor: c.surface2,
                   hoverColor: c.border,
                   onTap: onTap,
@@ -464,7 +464,7 @@ class _RailLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.dash;
-    final color = active ? const Color(0xFF111827) : c.textSoft;
+    final color = active ? c.onBrand : c.textSoft;
     if (name == kAllDept) {
       return Icon(LucideIcons.layoutGrid, size: size + 4.5, color: color);
     }
@@ -734,8 +734,8 @@ class _NavItem extends StatelessWidget {
 
     // Đồng bộ với rail: hàng bo tròn 12; đang chọn = nền vàng đặc + chữ tối
     // + bóng vàng nhẹ. Hover chỉ đổi nền (xem _HoverTile) — không rebuild.
-    const ink = Color(0xFF111827);
-    final onActive = ink.withValues(alpha: .1);
+    final ink = c.onBrand;
+    final onActive = ink.withValues(alpha: .12);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -747,7 +747,7 @@ class _NavItem extends StatelessWidget {
           boxShadow: active
               ? [
                   BoxShadow(
-                    color: Brand.yellow.withValues(alpha: .3),
+                    color: c.brand.withValues(alpha: .3),
                     blurRadius: 12,
                     offset: const Offset(0, 3),
                   ),
@@ -759,7 +759,7 @@ class _NavItem extends StatelessWidget {
           radius: 12,
           gap: 0,
           active: active,
-          activeColor: Brand.yellow,
+          activeColor: c.brand,
           hoverColor: c.surface2,
           onTap: onTap,
           child: Row(

@@ -68,7 +68,9 @@ class ThemeCurtainState extends State<ThemeCurtain>
     }
 
     _from = context.dash.bg;
-    _to = (current == Brightness.dark ? DashColors.light : DashColors.dark).bg;
+    _to = ThemeController.palette.value
+        .of(current == Brightness.dark ? Brightness.light : Brightness.dark)
+        .bg;
     setState(() => _active = true);
 
     try {

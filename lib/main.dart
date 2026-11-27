@@ -41,19 +41,24 @@ Future<void> main() async {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  static final _light = buildDashTheme(Brightness.light);
-  static final _dark = buildDashTheme(Brightness.dark);
+  // ThemeData theo (chủ đề, sáng/tối) — dựng 1 lần rồi dùng lại.
+  static final _cache = <(String, Brightness), ThemeData>{};
+  static ThemeData _theme(DashPalette p, Brightness b) =>
+      _cache.putIfAbsent((p.id, b), () => buildDashTheme(b, p));
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: ThemeController.mode,
-      builder: (context, mode, _) => MaterialApp(
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        ThemeController.mode,
+        ThemeController.palette,
+      ]),
+      builder: (context, _) => MaterialApp(
         title: 'IT PRO', // tiêu đề tab trình duyệt
         debugShowCheckedModeBanner: false,
-        theme: _light,
-        darkTheme: _dark,
-        themeMode: mode,
+        theme: _theme(ThemeController.palette.value, Brightness.light),
+        darkTheme: _theme(ThemeController.palette.value, Brightness.dark),
+        themeMode: ThemeController.mode.value,
         // Đổi theme tức thì. Animate (lerp ThemeData) bắt toàn bộ cây
         // rebuild + layout mỗi frame trong suốt animation → giật.
         themeAnimationDuration: Duration.zero,

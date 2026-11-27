@@ -185,6 +185,7 @@ class _TourViewState extends State<_TourView> with WidgetsBindingObserver {
                     painter: _ScrimPainter(
                       hole: r,
                       color: Colors.black.withValues(alpha: .62),
+                      ring: context.dash.brand,
                     ),
                   ),
                 ),
@@ -222,7 +223,8 @@ class _TourViewState extends State<_TourView> with WidgetsBindingObserver {
 class _ScrimPainter extends CustomPainter {
   final Rect? hole;
   final Color color;
-  _ScrimPainter({required this.hole, required this.color});
+  final Color ring;
+  _ScrimPainter({required this.hole, required this.color, required this.ring});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -238,19 +240,19 @@ class _ScrimPainter extends CustomPainter {
       ..addRect(full)
       ..addRRect(rr);
     canvas.drawPath(path, Paint()..color = color);
-    // Viền vàng thương hiệu quanh vùng sáng.
+    // Viền màu nhấn của chủ đề quanh vùng sáng.
     canvas.drawRRect(
       rr,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.5
-        ..color = Brand.yellow,
+        ..color = ring,
     );
   }
 
   @override
   bool shouldRepaint(_ScrimPainter old) =>
-      old.hole != hole || old.color != color;
+      old.hole != hole || old.color != color || old.ring != ring;
 }
 
 // ------------------------------------------------------------
@@ -369,14 +371,10 @@ class _Callout extends StatelessWidget {
                   height: 32,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: Brand.yellow,
+                    color: c.brand,
                     borderRadius: BorderRadius.circular(9),
                   ),
-                  child: Icon(
-                    step.icon,
-                    size: 17,
-                    color: const Color(0xFF111827),
-                  ),
+                  child: Icon(step.icon, size: 17, color: c.onBrand),
                 ),
                 const SizedBox(width: 11),
                 Expanded(
@@ -479,7 +477,7 @@ class _Callout extends StatelessWidget {
                     width: k == index ? 16 : 6,
                     height: 6,
                     decoration: BoxDecoration(
-                      color: k == index ? Brand.yellow : c.border,
+                      color: k == index ? c.brand : c.border,
                       borderRadius: BorderRadius.circular(99),
                     ),
                   ),

@@ -29,7 +29,7 @@ import '../widgets/upload_dialog.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/site_thumbnail.dart' show Shimmer;
 import '../widgets/team_art.dart' show DeptHealth;
-import '../widgets/theme_curtain.dart';
+import '../widgets/theme_picker.dart';
 import '../widgets/website_card.dart';
 
 enum StatusFilter { all, online, offline }
@@ -358,9 +358,11 @@ class _DashboardState extends State<Dashboard>
         ),
         TourStep(
           target: _tk.theme,
-          icon: LucideIcons.sunMoon,
-          title: 'Giao diện Sáng / Tối',
-          body: 'Chuyển giữa Light và Dark. Lựa chọn được ghi nhớ cho lần sau.',
+          icon: LucideIcons.palette,
+          title: 'Giao diện & chủ đề màu',
+          body:
+              'Chọn Sáng / Tối và chủ đề màu theo lĩnh vực (IT, MA, PC, '
+              'Product, Xưởng…). Lựa chọn được ghi nhớ cho lần sau.',
         ),
         TourStep(
           target: _tk.refresh,
@@ -1879,28 +1881,59 @@ class _GroupIcon extends StatelessWidget {
   }
 }
 
-/// Đổi Light/Dark.
+/// Nút "Giao diện": mở popover chọn Sáng/Tối + chủ đề màu (gộp 1 nút cho gọn).
+/// Chấm nhỏ góc icon = màu nhấn của chủ đề đang dùng.
 class _ThemeToggle extends StatelessWidget {
   const _ThemeToggle({super.key});
 
   @override
   Widget build(BuildContext context) {
     final c = context.dash;
-    final dark = context.isDark;
-    return _GroupIcon(
-      tooltip: dark ? 'Chuyển sang Light' : 'Chuyển sang Dark',
-      color: dark ? Brand.yellow : c.text,
-      onTap: () {
-        final curtain = ThemeCurtain.of(context);
-        if (curtain != null) {
-          curtain.toggle();
-        } else {
-          ThemeController.toggle(Theme.of(context).brightness);
-        }
-      },
-      child: Icon(
-        dark ? LucideIcons.moon : LucideIcons.sun,
-        key: ValueKey(dark),
+    return MenuAnchor(
+      alignmentOffset: const Offset(0, 8),
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(c.surface),
+        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        elevation: const WidgetStatePropertyAll(14),
+        shadowColor: WidgetStatePropertyAll(
+          Colors.black.withValues(alpha: context.isDark ? .6 : .18),
+        ),
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: c.border),
+          ),
+        ),
+      ),
+      menuChildren: const [ThemePanel()],
+      builder: (context, menu, _) => _GroupIcon(
+        tooltip: 'Giao diện: Sáng/Tối & chủ đề màu',
+        color: c.text,
+        active: menu.isOpen,
+        onTap: () => menu.isOpen ? menu.close() : menu.open(),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            const Icon(LucideIcons.palette),
+            Positioned(
+              right: -2,
+              bottom: -2,
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: c.brand,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: menu.isOpen ? c.surface2 : c.surface,
+                    width: 1.5,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
