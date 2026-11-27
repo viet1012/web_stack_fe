@@ -57,10 +57,79 @@ class _WebsiteCardState extends State<WebsiteCard> {
   bool _copied = false;
   Timer? _copyTimer;
 
+  /// Chuột đang ở trên card → hiện thanh nút nổi (sửa · mở · copy).
+  final _hover = ValueNotifier(false);
+
   @override
   void dispose() {
     _copyTimer?.cancel();
+    _hover.dispose();
     super.dispose();
+  }
+
+  /// Sửa (IT) · mở tab mới · copy URL.
+  List<Widget> _actions(StatusTone t) => [
+    if (widget.onEdit != null)
+      _IconBtn(
+        icon: LucideIcons.pencil,
+        tooltip: 'Sửa website (IT)',
+        size: 15,
+        onTap: widget.onEdit!,
+      ),
+    _IconBtn(
+      icon: LucideIcons.externalLink,
+      tooltip: 'Open in new tab',
+      onTap: widget.onOpen,
+    ),
+    _IconBtn(
+      icon: _copied ? LucideIcons.check : LucideIcons.copy,
+      tooltip: _copied ? 'Copied' : 'Copy URL',
+      color: _copied ? t.okFg : null,
+      onTap: _copy,
+    ),
+  ];
+
+  /// Thanh nút nổi góc phải trên ảnh preview: chỉ hiện khi hover card (hoặc
+  /// vừa copy) → hàng tên có trọn chiều ngang, tên không bị bẻ giữa chữ.
+  /// Hover chỉ rebuild thanh này, không rebuild card.
+  Widget _floatingActions(StatusTone t) {
+    final c = context.dash;
+    return ValueListenableBuilder<bool>(
+      valueListenable: _hover,
+      builder: (context, h, child) {
+        final show = h || _copied;
+        return IgnorePointer(
+          ignoring: !show,
+          child: AnimatedOpacity(
+            opacity: show ? 1 : 0,
+            duration: Motion.of(context, Motion.fast),
+            curve: Motion.curve,
+            child: AnimatedSlide(
+              offset: show ? Offset.zero : const Offset(0, -.12),
+              duration: Motion.of(context, Motion.fast),
+              curve: Motion.curve,
+              child: child,
+            ),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: c.border),
+          boxShadow: [
+            BoxShadow(
+              color: c.shadow,
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: _actions(t)),
+      ),
+    );
   }
 
   Future<void> _copy() async {
@@ -78,6 +147,10 @@ class _WebsiteCardState extends State<WebsiteCard> {
     final c = context.dash;
     final t = context.tone;
     final w = widget.website;
+    // Có ảnh preview + màn đủ rộng (có chuột) → nút sửa/mở/copy nổi trên ảnh
+    // khi hover. Tắt preview / màn hẹp (cảm ứng) → nút nằm cố định ở hàng tên.
+    final floating =
+        widget.showPreview && MediaQuery.sizeOf(context).width >= 600;
 
     return ValueListenableBuilder<SiteStatus>(
       valueListenable: widget.status,
@@ -90,6 +163,7 @@ class _WebsiteCardState extends State<WebsiteCard> {
           label: '${w.name}, ${spec.label}',
           // Hover: chỉ repaint viền/bóng — nội dung KHÔNG rebuild.
           child: HoverSurface(
+            hover: _hover,
             radius: 12,
             clip: true,
             color: c.surface,
@@ -196,24 +270,7 @@ class _WebsiteCardState extends State<WebsiteCard> {
                           size: widget.starred ? 19 : 16,
                           onTap: widget.onToggleStar!,
                         ),
-                      if (widget.onEdit != null)
-                        _IconBtn(
-                          icon: LucideIcons.pencil,
-                          tooltip: 'Sửa website (IT)',
-                          size: 15,
-                          onTap: widget.onEdit!,
-                        ),
-                      _IconBtn(
-                        icon: LucideIcons.externalLink,
-                        tooltip: 'Open in new tab',
-                        onTap: widget.onOpen,
-                      ),
-                      _IconBtn(
-                        icon: _copied ? LucideIcons.check : LucideIcons.copy,
-                        tooltip: _copied ? 'Copied' : 'Copy URL',
-                        color: _copied ? t.okFg : null,
-                        onTap: _copy,
-                      ),
+                      if (!floating) ..._actions(t),
                     ],
                   ),
                 ),
@@ -224,12 +281,22 @@ class _WebsiteCardState extends State<WebsiteCard> {
                 if (widget.showPreview)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: GestureDetector(
-                        onTap: widget.onOpen,
-                        child: ScreenFrame(child: _preview(s)),
-                      ),
+                    child: Stack(
+                      children: [
+                        MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: GestureDetector(
+                            onTap: widget.onOpen,
+                            child: ScreenFrame(child: _preview(s)),
+                          ),
+                        ),
+                        if (floating)
+                          Positioned(
+                            top: 22,
+                            right: 6,
+                            child: _floatingActions(t),
+                          ),
+                      ],
                     ),
                   ),
               ],
