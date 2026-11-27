@@ -110,12 +110,15 @@ Logic: [`status_store.dart`](lib/services/status_store.dart) (`refreshAll`) → 
 lib/
 ├── main.dart                     # Khởi tạo: preload font, load theme, MaterialApp + ThemeCurtain
 ├── models/
-│   └── website.dart              # Website (id, name, url, departmentName, type, icon, iconUrl, certWarning)
+│   ├── website.dart              # Website (id, name, url, departmentName, type, icon, iconUrl, certWarning, isPrivate, owner)
+│   └── submission.dart           # Site người dùng thêm: visibility, trạng thái duyệt
 ├── services/
 │   ├── website_service.dart      # Dio + mọi endpoint (baseUrl ở đây)
 │   ├── status_store.dart         # Trạng thái từng site (ValueNotifier theo URL), lastSeen
 │   ├── screenshot_store.dart     # Meta/ảnh chụp
-│   └── visit_store.dart          # Đếm lượt mở site (Frequently visited)
+│   ├── visit_store.dart          # Đếm lượt mở site
+│   ├── auth_store.dart           # Đăng nhập (MOCK)
+│   └── submission_store.dart     # Thêm / duyệt website (MOCK)
 ├── theme/
 │   └── dash_theme.dart           # Token màu Light/Dark, StatusTone, màu phòng ban, font, Motion, ThemeController
 ├── screens/
@@ -128,7 +131,13 @@ lib/
     ├── theme_curtain.dart        # Hiệu ứng rèm cửa khi đổi theme
     ├── site_thumbnail.dart       # Ảnh preview + placeholder
     ├── preview_dialog.dart       # Dialog xem live (iframe)
-    └── iframe_view.dart
+    ├── iframe_view.dart
+    ├── form_ui.dart              # Dialog/side panel, DashButton, DashTextField, chip trạng thái duyệt
+    ├── login_dialog.dart         # Đăng nhập + ensureLoggedIn()
+    ├── upload_dialog.dart        # Form Thêm website / Sửa & gửi lại
+    ├── my_sites_panel.dart       # Panel "Website của tôi"
+    ├── review_panel.dart         # Panel "Duyệt website" (admin)
+    └── account_button.dart       # Avatar + menu tài khoản
 assets/logo.png                   # Logo sidebar (128px, resize từ web/favicon.png)
 web/icons/favicon-64.png          # Icon tab trình duyệt
 ```
@@ -148,15 +157,39 @@ File cũ không còn được import ở đâu (có thể xoá): `screens/port_s
 - Phím tắt: `/` focus ô search, `Esc` xoá search.
 - Tự refresh mỗi 60s; tạm dừng khi tab trình duyệt bị ẩn.
 
-### Frequently visited
-- Khung cùng kiểu khung phòng ban, tiêu đề **★ Frequently visited** (sao vàng) + số site.
-- Gồm 2 loại:
-  1. **Site gắn sao ★** — bấm ☆ trên bất kỳ card nào để ghim. Luôn hiện (kể cả offline), không giới hạn số lượng, **không hết hạn** (lưu `itpro.starred`, mất khi bỏ sao hoặc xoá dữ liệu trình duyệt).
-  2. **Site mở nhiều nhất** — online, chưa gắn sao, lấp cho đủ 5 ô. Đếm lượt mở trong **30 ngày gần nhất** (cửa sổ trượt: lượt cũ hơn 30 ngày tự bị xoá), lưu `itpro.visits`.
-- Dữ liệu theo **từng trình duyệt** (localStorage), không đồng bộ giữa máy/người dùng. Không có dữ liệu → ẩn khung.
-- Mỗi ô **chính là `WebsiteCard`** (giống hệt card trong lưới: preview, chấm trạng thái, nút mở/copy, theo nút ẩn/hiện preview). Không đủ chỗ cho cả 5 → cuộn ngang.
-- Mở site từ đây cũng ghi lượt.
-- **Kéo thả để đổi thứ tự** (`_FavSlot`: `Draggable` + `DragTarget`): nhấn giữ card → kéo → thả lên ô khác (ô đích hiện viền đậm). Kéo sang trái = chèn trước, sang phải = chèn sau. Thứ tự lưu ở `itpro.favOrder`; site chưa từng kéo đứng sau, theo số lượt mở.
+### Favorites
+- Khung cùng kiểu khung phòng ban, tiêu đề **★ Favorites** (sao vàng) + số site.
+- **Chỉ gồm site gắn sao ★** — bấm ☆ trên bất kỳ card nào để thêm, bấm ★ để gỡ. Luôn hiện (kể cả offline), không giới hạn, **không hết hạn** (lưu `itpro.starred`). Chưa gắn sao site nào → ẩn khung.
+- Dữ liệu theo **từng trình duyệt** (localStorage), không đồng bộ giữa máy/người dùng.
+- Mỗi ô **chính là `WebsiteCard`** (giống hệt card trong lưới). Không đủ chỗ → cuộn ngang.
+- **Kéo thả để đổi thứ tự** (`_FavSlot`: `Draggable` + `DragTarget`): nhấn giữ card → kéo → thả lên ô khác. Kéo sang trái = chèn trước, sang phải = chèn sau. Thứ tự lưu ở `itpro.favOrder`.
+
+### Thêm website · Đăng nhập · Duyệt (UI — dữ liệu MOCK, chưa nối BE)
+- **Nút `+ Thêm website`** (nút đặc duy nhất ở header; màn < 900px nằm ở thanh trên cạnh logo). Chưa đăng nhập → mở dialog đăng nhập trước.
+- **Form** ([`upload_dialog.dart`](lib/widgets/upload_dialog.dart)): URL (tự thêm `http://`, bỏ `/` cuối, báo trùng với site đã có) → Tên (tự gợi ý từ host) + Phòng ban (dropdown, chung 1 hàng) → **Ảnh xem trước** (tuỳ chọn, PNG/JPG/WebP ≤ 5 MB, tự thu nhỏ còn cạnh dài 1280px; **bỏ trống → tự chụp màn hình như site thường**) → **Ai có thể xem?**
+
+  | | Ai xem | Duyệt | Hiện trên lưới |
+  |---|---|---|---|
+  | **Public** | Mọi người, không cần đăng nhập | **Cần admin phê duyệt** | Sau khi duyệt |
+  | **Private** | Chỉ người thêm + admin (phải đăng nhập) | Không cần | Ngay, có icon 🔒 cạnh tên |
+
+  Public có thêm ô *Ghi chú cho admin* (tuỳ chọn). Gửi xong → màn xác nhận (Public có thanh tiến trình *Đã gửi → Admin duyệt → Hiện công khai*).
+- **Avatar** (góc phải): menu *Website của tôi* · *Duyệt website* (admin) · *Đăng xuất*. Chấm vàng = có site chờ duyệt (admin), chấm đỏ = site của bạn bị từ chối.
+- **Website của tôi** (panel phải, [`my_sites_panel.dart`](lib/widgets/my_sites_panel.dart)): lọc Tất cả / Chờ duyệt / Đang hiển thị / Bị từ chối; bị từ chối hiện lý do + nút *Sửa & gửi lại*; rút lại / gỡ có *Hoàn tác*.
+- **Duyệt website** (admin, [`review_panel.dart`](lib/widgets/review_panel.dart)): hàng chờ (cũ nhất trước), bấm URL để mở thử; *Phê duyệt* / *Từ chối* (bắt buộc lý do, có lý do gợi ý); tab *Đã xử lý*; mọi thao tác có *Hoàn tác*.
+- **Mock:** [`auth_store.dart`](lib/services/auth_store.dart) — đăng nhập `admin` = quyền admin, tên khác = người dùng; mật khẩu bất kỳ ≥ 4 ký tự. [`submission_store.dart`](lib/services/submission_store.dart) — có sẵn 4 site mẫu, lưu localStorage. Site người dùng thêm có **id âm** (không gọi favicon từ BE). Ảnh tự tải lên lưu dạng data URL trong localStorage (giới hạn ~5 MB/trình duyệt — vượt thì không lưu được); khi có BE: upload multipart, lưu URL vào field `previewUrl` của site.
+- **Khi nối BE**, thay các hàm mock bằng API (đề xuất):
+
+  | Method | Path | Dùng cho |
+  |---|---|---|
+  | POST | `/api/auth/login` · `/api/auth/logout` · GET `/api/auth/me` | Đăng nhập (token/cookie), lấy user + role |
+  | GET | `/api/websites` | Trả thêm site người dùng mà user **được xem** (lọc ở BE), kèm `visibility`, `owner` |
+  | GET · POST | `/api/submissions/mine` · `/api/submissions` | Danh sách của tôi · gửi mới `{name,url,department,visibility,note}` |
+  | PUT · DELETE | `/api/submissions/{id}` | Sửa & gửi lại · rút lại / gỡ |
+  | GET | `/api/submissions?status=pending` | Hàng chờ (admin) |
+  | POST | `/api/submissions/{id}/approve` · `/reject` `{reason}` | Duyệt / từ chối (admin) |
+
+  ⚠ Quyền Private/admin **phải kiểm tra ở BE** — FE chỉ ẩn/hiện giao diện.
 
 ### Lưới card (nhóm theo phòng ban)
 - Mỗi phòng ban là **một khung**: không màu, chỉ **viền đen (Light) / trắng (Dark)**, bo 16px.
@@ -274,11 +307,13 @@ Thêm icon: sửa `kSiteIcons` (và `_byName` nếu muốn tự đoán) trong [`
 
 | Key (localStorage) | Nội dung |
 |---|---|
-| `itpro.visits` | `{ siteId: [timestamp ms…] }`, giữ 30 ngày — cho *Frequently visited* |
+| `itpro.visits` | `{ siteId: [timestamp ms…] }`, giữ 30 ngày — đếm lượt mở (hiện không hiển thị) |
 | `itpro.sidebarCollapsed` | `'1'` / `'0'` |
 | `itpro.showPreview` | `'1'` / `'0'` — hiện/ẩn preview mọi card (mặc định hiện) |
-| `itpro.favOrder` | `[siteId, …]` — thứ tự kéo thả của Frequently visited |
-| `itpro.starred` | `[siteId, …]` — site gắn sao (ghim lên Frequently visited, không hết hạn) |
+| `itpro.favOrder` | `[siteId, …]` — thứ tự kéo thả của Favorites |
+| `itpro.starred` | `[siteId, …]` — site gắn sao (hiện ở Favorites, không hết hạn) |
+| `itpro.mockUser` | User đăng nhập **mock** (username + role, **không** lưu mật khẩu) |
+| `itpro.mockSubmissions` | Site người dùng thêm (**mock**). Xoá key này để về dữ liệu mẫu |
 | `flutter.dash.themeMode` | `light` / `dark` (không có = theo hệ điều hành) |
 | `flutter.dash.lastSeen.v2` | Lần cuối mỗi site online |
 

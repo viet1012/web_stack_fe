@@ -7,15 +7,24 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/services.dart';
 
+import '../models/submission.dart';
 import '../models/website.dart';
+import '../services/auth_store.dart';
 import '../services/screenshot_store.dart';
 import '../services/status_store.dart';
+import '../services/submission_store.dart';
 import '../services/visit_store.dart';
 import '../services/website_service.dart';
 import '../theme/dash_theme.dart';
+import '../widgets/account_button.dart';
 import '../widgets/dash_ui.dart';
+import '../widgets/form_ui.dart' show showSidePanel;
+import '../widgets/login_dialog.dart';
+import '../widgets/my_sites_panel.dart';
 import '../widgets/onboarding_tour.dart';
 import '../widgets/preview_dialog.dart';
+import '../widgets/review_panel.dart';
+import '../widgets/upload_dialog.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/site_thumbnail.dart' show Shimmer;
 import '../widgets/team_art.dart' show DeptHealth;
@@ -36,6 +45,8 @@ class _TourKeys {
   final help = GlobalKey(debugLabel: 'tour.help');
   final frequent = GlobalKey(debugLabel: 'tour.frequent');
   final card = GlobalKey(debugLabel: 'tour.card');
+  final upload = GlobalKey(debugLabel: 'tour.upload');
+  final account = GlobalKey(debugLabel: 'tour.account');
 }
 
 class Dashboard extends StatefulWidget {
@@ -51,8 +62,34 @@ class _DashboardState extends State<Dashboard>
   // DATA
   // ============================================================
 
+  /// Site hiển thị = site hệ thống ([_remote], từ BE) + site người dùng thêm
+  /// mà user hiện tại được xem (Public đã duyệt, Private của mình / admin).
   List<Website> all = [];
+  List<Website> _remote = [];
   int _listVersion = 0;
+
+  void _mergeAll() {
+    all = [..._remote, ...submissions.visibleFor(auth.user)];
+    _listVersion++;
+  }
+
+  /// Site cần ảnh chụp tự động = mọi site KHÔNG có ảnh xem trước tự tải lên.
+  List<String> get _shotUrls => [
+    for (final w in all)
+      if (w.previewImage == null) w.url.trim(),
+  ];
+
+  /// Đăng nhập/đăng xuất, thêm/duyệt site → tính lại danh sách hiển thị.
+  /// Site mới xuất hiện (chưa có ảnh tự tải) → lấy ảnh chụp tự động ngay.
+  void _onAccountChanged() {
+    if (!mounted) return;
+    final before = _shotUrls.toSet();
+    setState(_mergeAll);
+    if (loading) return;
+    for (final url in _shotUrls) {
+      if (!before.contains(url)) shots.fetchOne(url);
+    }
+  }
   final StatusStore store = StatusStore();
   final ScreenshotStore shots = ScreenshotStore();
   final VisitStore visits = VisitStore()..load();
@@ -309,6 +346,42 @@ class _DashboardState extends State<Dashboard>
               'tạm khoá 10 giây để tránh bấm liên tục.',
         ),
         TourStep(
+          target: _tk.upload,
+          icon: LucideIcons.plus,
+          title: 'Thêm website',
+          body:
+              'Đăng ký website nội bộ của bạn lên dashboard (cần đăng nhập). '
+              'Chọn ai được xem:',
+          items: const [
+            (
+              LucideIcons.globe,
+              'Public: ai cũng xem được — hiện sau khi admin phê duyệt',
+            ),
+            (
+              LucideIcons.lock,
+              'Private: chỉ bạn và admin thấy — hiện ngay, không cần duyệt',
+            ),
+          ],
+        ),
+        TourStep(
+          target: _tk.account,
+          icon: LucideIcons.circleUser,
+          title: 'Tài khoản',
+          body:
+              'Đăng nhập để thêm website và xem site Private của bạn. Sau khi '
+              'đăng nhập, bấm vào avatar để mở:',
+          items: const [
+            (
+              LucideIcons.folderOpen,
+              'Website của tôi: theo dõi trạng thái duyệt, sửa & gửi lại',
+            ),
+            (
+              LucideIcons.shieldCheck,
+              'Duyệt website (chỉ admin): phê duyệt / từ chối site Public',
+            ),
+          ],
+        ),
+        TourStep(
           target: _tk.frequent,
           icon: LucideIcons.star,
           title: 'Favorites',
@@ -393,6 +466,8 @@ class _DashboardState extends State<Dashboard>
 
     store.addListener(_onStoreChanged);
     store.runVersion.addListener(_onRunFinished);
+    auth.addListener(_onAccountChanged);
+    submissions.addListener(_onAccountChanged);
     HardwareKeyboard.instance.addHandler(_onKey);
 
     // Tạm dừng auto-refresh khi tab bị ẩn; quay lại thì check nếu đã quá hạn.
@@ -419,6 +494,8 @@ class _DashboardState extends State<Dashboard>
     HardwareKeyboard.instance.removeHandler(_onKey);
     store.removeListener(_onStoreChanged);
     store.runVersion.removeListener(_onRunFinished);
+    auth.removeListener(_onAccountChanged);
+    submissions.removeListener(_onAccountChanged);
     store.dispose();
     shots.dispose();
     visits.dispose();
@@ -447,8 +524,8 @@ class _DashboardState extends State<Dashboard>
       if (!mounted) return;
 
       setState(() {
-        all = data;
-        _listVersion++;
+        _remote = data;
+        _mergeAll();
         loading = false;
       });
 
@@ -462,9 +539,8 @@ class _DashboardState extends State<Dashboard>
         Future.delayed(const Duration(milliseconds: 1600), _startTour);
       }
 
-      final urls = data.map((e) => e.url.trim()).toList();
-      store.refreshAll(data);
-      shots.fetchAll(urls);
+      store.refreshAll(all);
+      shots.fetchAll(_shotUrls);
     } catch (e) {
       debugPrint('[INITIAL LOAD ERROR] $e');
       if (!mounted) return;
@@ -481,7 +557,7 @@ class _DashboardState extends State<Dashboard>
   Future<void> _refresh({bool manual = true}) async {
     if (!mounted || _fetching || store.running) return;
     if (manual && _coolingDown.value) return;
-    if (loadError != null && all.isEmpty) return _initialLoad();
+    if (loadError != null && _remote.isEmpty) return _initialLoad();
 
     if (manual) {
       _coolingDown.value = true;
@@ -497,13 +573,13 @@ class _DashboardState extends State<Dashboard>
       final data = await WebsiteService.fetchWebsites();
       if (!mounted) return;
 
-      if (!isSameWebsiteList(all, data)) {
+      if (!isSameWebsiteList(_remote, data)) {
         listChanged = true;
         setState(() {
-          all = data;
-          _listVersion++;
+          _remote = data;
+          _mergeAll();
         });
-        final keep = data.map((e) => e.url.trim()).toSet();
+        final keep = all.map((e) => e.url.trim()).toSet();
         store.retain(keep);
         shots.retain(keep);
       }
@@ -514,7 +590,7 @@ class _DashboardState extends State<Dashboard>
     }
 
     if (!mounted) return;
-    final urls = all.map((e) => e.url.trim()).toList();
+    final urls = _shotUrls;
 
     if (manual) {
       shots.refreshAll(urls);
@@ -738,6 +814,63 @@ class _DashboardState extends State<Dashboard>
     setState(() => selectedDepartment = v);
   }
 
+  // ------------------------------------------------------------
+  // THÊM WEBSITE / TÀI KHOẢN (UI mock — xem services/submission_store.dart)
+  // ------------------------------------------------------------
+
+  /// Phòng ban cho form: thứ tự chuẩn + phòng ban lạ có trong dữ liệu.
+  List<String> get _formDepartments {
+    final names = {
+      ...kDeptColors.keys,
+      for (final w in _remote)
+        if (w.departmentName.trim().isNotEmpty) w.departmentName.trim(),
+    }.toList()
+      ..sort((a, b) {
+        final r = deptRank(a).compareTo(deptRank(b));
+        return r != 0 ? r : a.compareTo(b);
+      });
+    return names;
+  }
+
+  Future<void> _upload({Submission? edit}) async {
+    final ok = await ensureLoggedIn(
+      context,
+      reason: 'Đăng nhập để thêm website lên dashboard.',
+    );
+    if (!ok || !mounted) return;
+    await showUploadDialog(
+      context,
+      departments: _formDepartments,
+      systemSites: _remote,
+      edit: edit,
+      onOpenMine: _openMySites,
+    );
+  }
+
+  void _login() => ensureLoggedIn(context);
+
+  void _openMySites() {
+    if (!auth.loggedIn) return;
+    showSidePanel(
+      context,
+      builder: (panel) => MySitesPanel(
+        onAdd: () {
+          Navigator.of(panel).pop();
+          _upload();
+        },
+        onEdit: (s) {
+          Navigator.of(panel).pop();
+          _upload(edit: s);
+        },
+      ),
+    );
+  }
+
+  void _openReview() {
+    if (!auth.isAdmin) return;
+    showSidePanel(context, width: 520, builder: (_) => const ReviewPanel());
+  }
+
   // ============================================================
   // BUILD
   // ============================================================
@@ -748,11 +881,31 @@ class _DashboardState extends State<Dashboard>
     final width = MediaQuery.sizeOf(context).width;
     final narrow = width < 900;
     final pad = width < 600 ? 16.0 : 24.0;
-    // Đủ chỗ (sidebar + tiêu đề + search 260 + filter + refresh) → 1 hàng.
+    // Đủ chỗ (sidebar + tiêu đề + search 240 + filter + refresh) → 1 hàng.
     final sideW = narrow
         ? 0.0
         : (_sidebarCollapsed ? Sidebar.railWidth : Sidebar.wideWidth);
-    final inlineTools = width - sideW >= 948;
+    // + nút Thêm website & tài khoản (~290px) → ngưỡng cao hơn.
+    final inlineTools = width - sideW >= 1220;
+    // Vùng nội dung hẹp: Thêm website / Đăng nhập / Refresh chỉ còn icon.
+    final compactActions = width - sideW < 1000;
+
+    // Thêm website + tài khoản: màn rộng ở header, màn hẹp ở thanh trên cùng
+    // (cạnh logo) để tiêu đề không bị bóp.
+    Widget actions({required bool compact}) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _UploadButton(key: _tk.upload, compact: compact, onTap: _upload),
+        const SizedBox(width: 10),
+        AccountButton(
+          key: _tk.account,
+          compact: compact,
+          onLogin: _login,
+          onMySites: _openMySites,
+          onReview: _openReview,
+        ),
+      ],
+    );
 
     Widget sidebar({required bool compact}) => ListenableBuilder(
       key: _tk.sidebar,
@@ -766,6 +919,7 @@ class _DashboardState extends State<Dashboard>
         collapsed: _sidebarCollapsed,
         onToggleCollapsed: _toggleSidebar,
         onSelect: _selectDept,
+        actions: compact ? actions(compact: width < 600) : null,
       ),
     );
 
@@ -787,7 +941,7 @@ class _DashboardState extends State<Dashboard>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           for (final (i, t) in _toolbarItems(
-                            searchWidth: 260,
+                            searchWidth: 240,
                           ).indexed) ...[
                             if (i > 0) const SizedBox(width: 10),
                             t,
@@ -806,6 +960,8 @@ class _DashboardState extends State<Dashboard>
                 onRefresh: () => _refresh(manual: true),
                 showPreview: _showPreview,
                 onTogglePreview: _togglePreviewAll,
+                compactActions: !narrow && compactActions,
+                actions: narrow ? null : actions(compact: compactActions),
               ),
             ),
           ),
@@ -1107,7 +1263,7 @@ class _DashboardState extends State<Dashboard>
       );
     }
 
-    if (loadError != null && all.isEmpty) {
+    if (loadError != null && _remote.isEmpty) {
       return SliverToBoxAdapter(
         child: _EmptyState(
           icon: LucideIcons.wifiOff,
@@ -1397,9 +1553,18 @@ class _Header extends StatelessWidget {
   final _TourKeys tourKeys;
   final VoidCallback onHelp;
 
+  /// Nút "Thêm website" + avatar/đăng nhập ở góc phải (null = màn hẹp, nằm
+  /// ở thanh trên cùng).
+  final Widget? actions;
+
+  /// Refresh chỉ còn icon.
+  final bool compactActions;
+
   const _Header({
     required this.tourKeys,
     required this.onHelp,
+    this.actions,
+    required this.compactActions,
     this.tools,
     required this.showPreview,
     required this.onTogglePreview,
@@ -1526,10 +1691,61 @@ class _Header extends StatelessWidget {
             spin: spin,
             running: running,
             coolingDown: cooling,
+            compact: compactActions,
             onTap: onRefresh,
           ),
         ),
+        if (actions != null) ...[
+          // Vách ngăn mảnh: nhóm "xem" (trái) ↔ nhóm "hành động" (phải).
+          Container(
+            width: 1,
+            height: 22,
+            margin: const EdgeInsets.symmetric(horizontal: 12),
+            color: c.border,
+          ),
+          actions!,
+        ],
       ],
+    );
+  }
+}
+
+/// Nút chính duy nhất ở header: nền ink (đen ở Light / trắng ở Dark).
+class _UploadButton extends StatelessWidget {
+  final bool compact;
+  final VoidCallback onTap;
+  const _UploadButton({super.key, required this.compact, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.dash;
+    return Tooltip(
+      message: 'Thêm website lên dashboard',
+      child: FilledButton(
+        onPressed: onTap,
+        style: FilledButton.styleFrom(
+          backgroundColor: c.ink,
+          foregroundColor: c.onInk,
+          overlayColor: c.onInk,
+          minimumSize: const Size(38, 38),
+          fixedSize: compact ? const Size(38, 38) : null,
+          padding: EdgeInsets.symmetric(horizontal: compact ? 0 : 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(LucideIcons.plus, size: 17),
+            if (!compact) ...[
+              const SizedBox(width: 6),
+              const Text('Thêm website'),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1637,22 +1853,52 @@ class _RefreshButton extends StatelessWidget {
   final bool coolingDown;
   final VoidCallback onTap;
 
+  /// Màn hẹp: chỉ còn icon (38×38).
+  final bool compact;
+
   const _RefreshButton({
     required this.spin,
     required this.running,
     required this.coolingDown,
     required this.onTap,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = context.dash;
     final disabled = running || coolingDown;
+    final tip = coolingDown && !running
+        ? 'Just refreshed — wait a few seconds'
+        : 'Re-capture screenshots & re-check all sites';
+
+    if (compact) {
+      return Tooltip(
+        message: tip,
+        child: OutlinedButton(
+          onPressed: disabled ? null : onTap,
+          style: OutlinedButton.styleFrom(
+            backgroundColor: c.surface,
+            foregroundColor: c.text,
+            disabledForegroundColor: c.muted,
+            side: BorderSide(color: c.border),
+            fixedSize: const Size(38, 38),
+            minimumSize: const Size(38, 38),
+            padding: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: RotationTransition(
+            turns: spin,
+            child: const Icon(LucideIcons.refreshCw, size: 17),
+          ),
+        ),
+      );
+    }
 
     return Tooltip(
-      message: coolingDown && !running
-          ? 'Just refreshed — wait a few seconds'
-          : 'Re-capture screenshots & re-check all sites',
+      message: tip,
       child: OutlinedButton.icon(
         onPressed: disabled ? null : onTap,
         style: OutlinedButton.styleFrom(

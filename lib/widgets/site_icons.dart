@@ -48,7 +48,8 @@ class _SiteIconState extends State<SiteIcon> {
         color: c.surface2,
         borderRadius: BorderRadius.circular(size / 4),
       ),
-      child: _missing.contains(src)
+      // id âm = site người dùng thêm (mock, chưa có trên BE) → không gọi API.
+      child: w.id < 0 || _missing.contains(src)
           ? glyph
           : Image.network(
               src,

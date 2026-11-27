@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../models/website.dart';
+import '../services/auth_store.dart';
 import '../services/screenshot_store.dart';
 import '../services/status_store.dart';
 import '../theme/dash_theme.dart';
@@ -134,6 +135,21 @@ class _WebsiteCardState extends State<WebsiteCard> {
                                     size: 8,
                                   ),
                                 ),
+                                // Site Private (người dùng thêm): ổ khoá.
+                                if (w.isPrivate) ...[
+                                  const SizedBox(width: 5),
+                                  Tooltip(
+                                    message:
+                                        w.owner == auth.user?.username
+                                        ? 'Private · chỉ bạn và admin thấy'
+                                        : 'Private · của ${w.owner ?? '—'}',
+                                    child: Icon(
+                                      LucideIcons.lock,
+                                      size: 12.5,
+                                      color: c.muted,
+                                    ),
+                                  ),
+                                ],
                                 if (cert) ...[
                                   const SizedBox(width: 5),
                                   Tooltip(

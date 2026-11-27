@@ -26,6 +26,9 @@ class Sidebar extends StatelessWidget {
   final bool collapsed;
   final VoidCallback? onToggleCollapsed;
 
+  /// Chỉ dùng ở [compact]: nút Thêm website + tài khoản, đặt bên phải logo.
+  final Widget? actions;
+
   static const double wideWidth = 232;
   static const double railWidth = 64;
 
@@ -43,6 +46,7 @@ class Sidebar extends StatelessWidget {
     this.compact = false,
     this.collapsed = false,
     this.onToggleCollapsed,
+    this.actions,
   });
 
   @override
@@ -264,6 +268,7 @@ class Sidebar extends StatelessWidget {
               const BrandLogo(),
               const Spacer(),
               _HealthLine(online: online, total: total),
+              if (actions != null) ...[const SizedBox(width: 14), actions!],
             ],
           ),
           const SizedBox(height: 8),

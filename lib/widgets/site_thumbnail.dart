@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
 import '../models/website.dart';
+import '../services/preview_image.dart';
 import '../services/status_store.dart';
 import '../services/website_service.dart';
 import '../theme/dash_theme.dart';
@@ -150,8 +151,34 @@ class _SiteThumbnailState extends State<SiteThumbnail> {
     if (v != _visible && mounted) setState(() => _visible = v);
   }
 
+  /// Ảnh xem trước người dùng tự tải lên → hiện thẳng, bỏ qua ảnh chụp tự động.
+  Widget _custom(BuildContext context, String src) {
+    final c = context.dash;
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(color: c.surface2),
+          Image(
+            image: previewImageProvider(src),
+            fit: BoxFit.cover,
+            alignment: Alignment.topCenter,
+            gaplessPlayback: true,
+            errorBuilder: (_, _, _) => ThumbPlaceholder(
+              kind: thumbKindFor(widget.website),
+              color: tagColor(widget.website.type),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final custom = widget.website.previewImage;
+    if (custom != null) return _custom(context, custom);
+
     final c = context.dash;
     final want = _wantImage;
     final src = _src;
