@@ -67,8 +67,19 @@ class _WebsiteCardState extends State<WebsiteCard> {
     super.dispose();
   }
 
-  /// Sửa (IT) · mở tab mới · copy URL.
+  /// Gắn sao · sửa (IT) · copy URL. (Mở tab mới = bấm vào card.)
   List<Widget> _actions(StatusTone t) => [
+    if (widget.onToggleStar != null)
+      _IconBtn(
+        // ★ đặc (Material) khi đã gắn — Lucide chỉ có bản viền.
+        icon: widget.starred ? Icons.star_rounded : LucideIcons.star,
+        tooltip: widget.starred
+            ? 'Bỏ sao (gỡ khỏi Favorites)'
+            : 'Gắn sao (thêm vào Favorites)',
+        color: widget.starred ? Brand.yellow : null,
+        size: widget.starred ? 19 : 16,
+        onTap: widget.onToggleStar!,
+      ),
     if (widget.onEdit != null)
       _IconBtn(
         icon: LucideIcons.pencil,
@@ -76,11 +87,6 @@ class _WebsiteCardState extends State<WebsiteCard> {
         size: 15,
         onTap: widget.onEdit!,
       ),
-    _IconBtn(
-      icon: LucideIcons.externalLink,
-      tooltip: 'Open in new tab',
-      onTap: widget.onOpen,
-    ),
     _IconBtn(
       icon: _copied ? LucideIcons.check : LucideIcons.copy,
       tooltip: _copied ? 'Copied' : 'Copy URL',
@@ -147,10 +153,11 @@ class _WebsiteCardState extends State<WebsiteCard> {
     final c = context.dash;
     final t = context.tone;
     final w = widget.website;
-    // Có ảnh preview + màn đủ rộng (có chuột) → nút sửa/mở/copy nổi trên ảnh
-    // khi hover. Tắt preview / màn hẹp (cảm ứng) → nút nằm cố định ở hàng tên.
-    final floating =
-        widget.showPreview && MediaQuery.sizeOf(context).width >= 600;
+    // Màn đủ rộng (có chuột) → nút sao/sửa/copy nổi lên khi hover: trên ảnh
+    // (có preview) hoặc góc phải card (tắt preview). Hàng tên có trọn chiều
+    // ngang → tên không bị bẻ giữa chữ, các card thẳng hàng.
+    // Màn hẹp (cảm ứng, không hover) → nút nằm cố định ở hàng tên.
+    final floating = MediaQuery.sizeOf(context).width >= 600;
 
     return ValueListenableBuilder<SiteStatus>(
       valueListenable: widget.status,
@@ -162,8 +169,11 @@ class _WebsiteCardState extends State<WebsiteCard> {
           container: true,
           label: '${w.name}, ${spec.label}',
           // Hover: chỉ repaint viền/bóng — nội dung KHÔNG rebuild.
+          // Bấm bất kỳ đâu trên card = mở site ở tab mới (các nút bên trong
+          // vẫn nhận bấm riêng).
           child: HoverSurface(
             hover: _hover,
+            onTap: widget.onOpen,
             radius: 12,
             clip: true,
             color: c.surface,
@@ -171,134 +181,142 @@ class _WebsiteCardState extends State<WebsiteCard> {
             borderColor: s.isOffline ? t.offBorder : c.border,
             hoverBorderColor: s.isOffline ? t.offBorder : c.faint,
             hoverShadow: c.shadow,
-            // Card được giãn bằng card cao nhất cùng hàng; Spacer dồn khoảng
-            // trống xuống dưới phần chữ → khung ảnh luôn bám đáy, thẳng hàng.
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            child: Stack(
+              fit: StackFit.passthrough,
               children: [
-                // Tên · chấm · địa chỉ · nút (đặt trên ảnh)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
-                  child: Row(
-                    children: [
-                      SiteIcon(website: w, size: 44),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
+                // Card được giãn bằng card cao nhất cùng hàng; Spacer dồn khoảng
+                // trống xuống dưới phần chữ → khung ảnh luôn bám đáy, thẳng hàng.
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Tên · chấm · địa chỉ (+ nút khi màn hẹp)
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        10,
+                        10,
+                        floating ? 12 : 6,
+                        10,
+                      ),
+                      child: Row(
+                        children: [
+                          SiteIcon(website: w, size: 44),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Không cắt "…": tên dài tự xuống dòng.
-                                Flexible(
-                                  child: Text(
-                                    w.name,
-                                    softWrap: true,
-                                    style: TextStyle(
-                                      color: c.text,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      height: 1.25,
+                                Row(
+                                  children: [
+                                    // Không cắt "…": tên dài tự xuống dòng.
+                                    Flexible(
+                                      child: Text(
+                                        w.name,
+                                        softWrap: true,
+                                        style: TextStyle(
+                                          color: c.text,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1.25,
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                    const SizedBox(width: 7),
+                                    // Trạng thái = 1 dấu chấm (chi tiết ở tooltip).
+                                    Tooltip(
+                                      message: cert
+                                          ? '${spec.label} · Cert warning'
+                                          : spec.label,
+                                      child: StatusDot(
+                                        color: statusDotColor(s, t),
+                                        size: 8,
+                                      ),
+                                    ),
+                                    // Site Private (người dùng thêm): ổ khoá.
+                                    if (w.isPrivate) ...[
+                                      const SizedBox(width: 5),
+                                      Tooltip(
+                                        message: w.owner == auth.user?.username
+                                            ? 'Private · chỉ bạn và admin thấy'
+                                            : 'Private · của ${w.ownerName ?? w.owner ?? '—'}',
+                                        child: Icon(
+                                          LucideIcons.lock,
+                                          size: 12.5,
+                                          color: c.muted,
+                                        ),
+                                      ),
+                                    ],
+                                    if (cert) ...[
+                                      const SizedBox(width: 5),
+                                      Tooltip(
+                                        message:
+                                            'Chứng chỉ tự ký – trình duyệt sẽ cảnh báo khi mở',
+                                        child: Icon(
+                                          LucideIcons.shieldAlert,
+                                          size: 13,
+                                          color: t.slowFg,
+                                        ),
+                                      ),
+                                    ],
+                                    // Nút sao nằm trong thanh nổi → đã gắn sao
+                                    // thì vẫn hiện ★ nhỏ cạnh tên.
+                                    if (floating && widget.starred) ...[
+                                      const SizedBox(width: 4),
+                                      const Icon(
+                                        Icons.star_rounded,
+                                        size: 15,
+                                        color: Brand.yellow,
+                                      ),
+                                    ],
+                                  ],
                                 ),
-                                const SizedBox(width: 7),
-                                // Trạng thái = 1 dấu chấm (chi tiết ở tooltip).
+                                const SizedBox(height: 2),
                                 Tooltip(
-                                  message: cert
-                                      ? '${spec.label} · Cert warning'
-                                      : spec.label,
-                                  child: StatusDot(
-                                    color: statusDotColor(s, t),
-                                    size: 8,
+                                  message: w.url,
+                                  // Không cắt "…": host dài xuống dòng tại . - : /
+                                  child: Text(
+                                    breakableHost(w.url),
+                                    softWrap: true,
+                                    style: monoText(
+                                      size: 11.5,
+                                      color: c.hostText,
+                                    ),
                                   ),
                                 ),
-                                // Site Private (người dùng thêm): ổ khoá.
-                                if (w.isPrivate) ...[
-                                  const SizedBox(width: 5),
-                                  Tooltip(
-                                    message:
-                                        w.owner == auth.user?.username
-                                        ? 'Private · chỉ bạn và admin thấy'
-                                        : 'Private · của ${w.ownerName ?? w.owner ?? '—'}',
-                                    child: Icon(
-                                      LucideIcons.lock,
-                                      size: 12.5,
-                                      color: c.muted,
-                                    ),
-                                  ),
-                                ],
-                                if (cert) ...[
-                                  const SizedBox(width: 5),
-                                  Tooltip(
-                                    message:
-                                        'Chứng chỉ tự ký – trình duyệt sẽ cảnh báo khi mở',
-                                    child: Icon(
-                                      LucideIcons.shieldAlert,
-                                      size: 13,
-                                      color: t.slowFg,
-                                    ),
-                                  ),
-                                ],
                               ],
                             ),
-                            const SizedBox(height: 2),
-                            Tooltip(
-                              message: w.url,
-                              // Không cắt "…": host dài xuống dòng tại . - : /
-                              child: Text(
-                                breakableHost(w.url),
-                                softWrap: true,
-                                style: monoText(size: 11.5, color: c.hostText),
+                          ),
+                          if (!floating) ...[
+                            const SizedBox(width: 4),
+                            ..._actions(t),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+                    // Ảnh preview trong khung "cửa sổ trình duyệt".
+                    // Tắt preview (nút ở header) → không build ảnh, card chỉ còn
+                    // hàng tên/địa chỉ.
+                    if (widget.showPreview)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                        child: Stack(
+                          children: [
+                            ScreenFrame(child: _preview(s)),
+                            // Thanh nút nổi ở góc phải trên ảnh.
+                            if (floating)
+                              Positioned(
+                                top: 22,
+                                right: 6,
+                                child: _floatingActions(t),
                               ),
-                            ),
                           ],
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      if (widget.onToggleStar != null)
-                        _IconBtn(
-                          // ★ đặc (Material) khi đã gắn — Lucide chỉ có
-                          // bản viền, không thể hiện được trạng thái "đã gắn".
-                          icon: widget.starred
-                              ? Icons.star_rounded
-                              : LucideIcons.star,
-                          tooltip: widget.starred
-                              ? 'Bỏ sao (gỡ khỏi Favorites)'
-                              : 'Gắn sao (thêm vào Favorites)',
-                          color: widget.starred ? Brand.yellow : null,
-                          size: widget.starred ? 19 : 16,
-                          onTap: widget.onToggleStar!,
-                        ),
-                      if (!floating) ..._actions(t),
-                    ],
-                  ),
+                  ],
                 ),
-                const Spacer(),
-                // Ảnh preview trong khung "cửa sổ trình duyệt" — bấm để mở site.
-                // Tắt preview (nút ở header) → không build ảnh, card chỉ còn
-                // hàng tên/địa chỉ.
-                if (widget.showPreview)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                    child: Stack(
-                      children: [
-                        MouseRegion(
-                          cursor: SystemMouseCursors.click,
-                          child: GestureDetector(
-                            onTap: widget.onOpen,
-                            child: ScreenFrame(child: _preview(s)),
-                          ),
-                        ),
-                        if (floating)
-                          Positioned(
-                            top: 22,
-                            right: 6,
-                            child: _floatingActions(t),
-                          ),
-                      ],
-                    ),
-                  ),
+                // Tắt preview → thanh nút nổi ở góc phải trên card.
+                if (floating && !widget.showPreview)
+                  Positioned(top: 8, right: 8, child: _floatingActions(t)),
               ],
             ),
           ),
